@@ -6,8 +6,14 @@ from datetime import datetime
 # טען משתני סביבה
 load_dotenv()
 
-# התחברות ל־OpenAI עם המפתח
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# התחברות ל־OpenAI עם המפתח - ללא ברירת מחדל כדי לזהות בעיות
+try:
+    OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+    print("✅ chatbot.py - OPENAI_API_KEY נטען בהצלחה")
+    client = OpenAI(api_key=OPENAI_API_KEY)
+except KeyError as e:
+    print(f"❌ שגיאה ב-chatbot.py: משתנה סביבה חסר: {e}")
+    raise
 
 # שיחות לכל משתמש (לפי מזהה = מספר טלפון)
 conversations = {}
