@@ -302,4 +302,5 @@ def send_whatsapp_audio(to, audio_data):
         send_whatsapp_message(to, "❌ לא הצלחתי לשלוח תשובה קולית. אענה בטקסט.")
 
 if __name__ == '__main__':
-    app.run(port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
