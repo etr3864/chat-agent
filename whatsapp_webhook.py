@@ -12,11 +12,22 @@ from openai import OpenAI
 # טען משתני סביבה
 load_dotenv()
 
-INSTANCE_ID = os.getenv("ULTRA_INSTANCE_ID", "instance137396")
-TOKEN = os.getenv("ULTRA_TOKEN", "co579fjbu34budjt")
+# טען משתני סביבה - ללא ברירת מחדל כדי לזהות בעיות
+try:
+    INSTANCE_ID = os.environ["ULTRA_INSTANCE_ID"]
+    TOKEN = os.environ["ULTRA_TOKEN"]
+    OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+    
+    print("✅ INSTANCE_ID:", INSTANCE_ID)
+    print("✅ TOKEN prefix:", TOKEN[:5] + "*****")
+    print("✅ OPENAI_API_KEY prefix:", OPENAI_API_KEY[:10] + "*****")
+    
+except KeyError as e:
+    print(f"❌ שגיאה: משתנה סביבה חסר: {e}")
+    raise
 
 # התחברות ל־OpenAI עבור תמלול ו-TTS
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = Flask(__name__)
 
@@ -303,4 +314,11 @@ def send_whatsapp_audio(to, audio_data):
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 השרת מתחיל על פורט: {port}")
+    print(f"🌍 מצב: {'Production' if os.environ.get('FLASK_ENV') == 'production' else 'Development'}")
+    
+    # הגדר מצב production
+    app.config['ENV'] = 'production'
+    app.config['DEBUG'] = False
+    
     app.run(host="0.0.0.0", port=port)
