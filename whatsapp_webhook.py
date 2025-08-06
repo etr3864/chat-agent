@@ -125,6 +125,11 @@ def analyze_image(image_data):
         print(f"❌ שגיאה בניתוח תמונה: {e}")
         return None
 
+@app.route("/")
+def healthcheck():
+    """בדיקת בריאות לשרת - נדרש עבור Render"""
+    return "🚀 WhatsApp Chat Agent Server is alive ✅", 200
+
 @app.route('/webhook', methods=['POST'])
 def whatsapp_webhook():
     data = request.get_json()
