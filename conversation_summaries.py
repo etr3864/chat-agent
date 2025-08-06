@@ -2,12 +2,21 @@
 # -*- coding: utf-8 -*-
 
 """
-ניהול סיכומי שיחה נפרדים
+ניהול סיכומי שיחה נפרדים עם תמיכה ב-MongoDB ו-JSON
 """
 
 import os
 import json
 from datetime import datetime
+from typing import Dict, List, Optional
+
+# נסה לייבא את MongoDB Manager
+try:
+    from mongodb_manager import mongodb_manager
+    MONGODB_AVAILABLE = True
+except ImportError:
+    MONGODB_AVAILABLE = False
+    print("⚠️ MongoDB לא זמין, משתמש ב-JSON בלבד")
 
 # חילוץ שם הלקוח מהשיחה
 def extract_customer_name(user_id: str, conversations: dict, pushname: str = "") -> str:
@@ -54,6 +63,12 @@ class ConversationSummaries:
     def __init__(self, summaries_file="conversation_summaries.json"):
         self.summaries_file = summaries_file
         self.summaries = self.load_summaries()
+        self.mongodb_available = MONGODB_AVAILABLE and mongodb_manager.is_connected()
+        
+        if self.mongodb_available:
+            print("✅ משתמש ב-MongoDB לשמירת סיכומים")
+        else:
+            print("📄 משתמש בקבצי JSON לשמירת סיכומים")
     
     def load_summaries(self):
         """טען סיכומים קיימים"""
@@ -66,7 +81,7 @@ class ConversationSummaries:
         return {}
     
     def save_summaries(self):
-        """שמור סיכומים לקובץ"""
+        """שמור סיכומים לקובץ JSON (גיבוי)"""
         with open(self.summaries_file, "w", encoding="utf-8-sig") as f:
             json.dump(self.summaries, f, ensure_ascii=False, indent=2)
     
@@ -84,18 +99,61 @@ class ConversationSummaries:
             "total_messages": len([m for m in conversations.get(user_id, []) if m["role"] in ["user", "assistant"]])
         }
         
+        # שמור ב-JSON (גיבוי)
         self.summaries[user_id] = summary_data
         self.save_summaries()
+        
+        # שמור ב-MongoDB אם זמין
+        if self.mongodb_available:
+            mongodb_manager.save_summary(user_id, summary_data)
         
         print(f"✅ סיכום נשמר עבור {customer_name} ({user_id})")
     
     def get_summary(self, user_id: str):
         """קבל סיכום לפי מזהה משתמש"""
+        # נסה MongoDB קודם
+        if self.mongodb_available:
+            mongo_summary = mongodb_manager.get_summary(user_id)
+            if mongo_summary:
+                return mongo_summary
+        
+        # גיבוי ל-JSON
         return self.summaries.get(user_id)
     
     def get_all_summaries(self):
         """קבל את כל הסיכומים"""
+        # נסה MongoDB קודם
+        if self.mongodb_available:
+            mongo_summaries = mongodb_manager.get_all_summaries()
+            if mongo_summaries:
+                return {summary["phone_number"]: summary for summary in mongo_summaries}
+        
+        # גיבוי ל-JSON
         return self.summaries
+    
+    def search_summaries(self, query: str):
+        """חפש סיכומים לפי מספר טלפון או שם"""
+        # נסה MongoDB קודם
+        if self.mongodb_available:
+            # חפש לפי מספר טלפון
+            phone_results = mongodb_manager.search_by_phone(query)
+            if phone_results:
+                return phone_results
+            
+            # חפש לפי שם
+            name_results = mongodb_manager.search_by_name(query)
+            if name_results:
+                return name_results
+        
+        # גיבוי ל-JSON
+        results = {}
+        query_lower = query.lower()
+        for user_id, summary in self.summaries.items():
+            if (query_lower in user_id.lower() or 
+                query_lower in summary.get("customer_name", "").lower()):
+                results[user_id] = summary
+        
+        return list(results.values())
     
     def print_summary(self, user_id: str):
         """הדפס סיכום מסודר"""
@@ -118,14 +176,16 @@ class ConversationSummaries:
     
     def print_all_summaries(self):
         """הדפס את כל הסיכומים"""
-        if not self.summaries:
+        summaries = self.get_all_summaries()
+        
+        if not summaries:
             print("❌ אין סיכומים שמורים")
             return
         
-        print(f"📊 סיכומי שיחה - {len(self.summaries)} לקוחות")
+        print(f"📊 סיכומי שיחה - {len(summaries)} לקוחות")
         print("=" * 60)
         
-        for user_id, summary in self.summaries.items():
+        for user_id, summary in summaries.items():
             print(f"\n📱 {summary['phone_number']}")
             print(f"👤 {summary['customer_name']} ({summary['gender']})")
             print(f"📅 {summary['timestamp']}")
@@ -134,11 +194,13 @@ class ConversationSummaries:
     
     def export_to_txt(self, filename="all_summaries.txt"):
         """ייצא את כל הסיכומים לקובץ טקסט"""
+        summaries = self.get_all_summaries()
+        
         with open(filename, "w", encoding="utf-8-sig") as f:
             f.write("📊 סיכומי שיחה - VALUE+ Bot\n")
             f.write("=" * 60 + "\n\n")
             
-            for user_id, summary in self.summaries.items():
+            for user_id, summary in summaries.items():
                 f.write(f"📱 מספר טלפון: {summary['phone_number']}\n")
                 f.write(f"👤 שם לקוח: {summary['customer_name']}\n")
                 f.write(f"👥 מין: {summary['gender']}\n")
@@ -149,6 +211,33 @@ class ConversationSummaries:
                 f.write("=" * 60 + "\n\n")
         
         print(f"✅ סיכומים יוצאו לקובץ: {filename}")
+    
+    def get_statistics(self):
+        """קבל סטטיסטיקות על הסיכומים"""
+        if self.mongodb_available:
+            return mongodb_manager.get_statistics()
+        
+        # גיבוי ל-JSON
+        summaries = self.get_all_summaries()
+        
+        if not summaries:
+            return {}
+        
+        total_customers = len(summaries)
+        total_messages = sum(s['total_messages'] for s in summaries.values())
+        
+        # ספירת מין
+        gender_count = {}
+        for summary in summaries.values():
+            gender = summary['gender']
+            gender_count[gender] = gender_count.get(gender, 0) + 1
+        
+        return {
+            "total_customers": total_customers,
+            "total_messages": total_messages,
+            "avg_messages_per_customer": round(total_messages/total_customers, 1) if total_customers > 0 else 0,
+            "gender_distribution": gender_count
+        }
 
 # יצירת מופע גלובלי
 summaries_manager = ConversationSummaries() 
