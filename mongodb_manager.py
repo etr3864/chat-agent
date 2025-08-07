@@ -75,8 +75,9 @@ class MongoDBManager:
             return False
         
         try:
-            # הוסף תאריך עדכון
-            summary_data["updated_at"] = datetime.now()
+            # הוסף תאריך עדכון בפורמט UTC ISO 8601 עם דיוק של שניות
+            from datetime import datetime, timezone
+            summary_data["updated_at"] = datetime.now(timezone.utc).isoformat(timespec='seconds') + "Z"
             
             # עדכן או הוסף מסמך חדש
             result = self.collection.update_one(

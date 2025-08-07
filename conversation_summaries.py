@@ -7,7 +7,7 @@
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 # נסה לייבא את MongoDB Manager
@@ -95,7 +95,7 @@ class ConversationSummaries:
             "customer_name": customer_name,
             "gender": customer_gender,
             "summary": summary,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec='seconds') + "Z",
             "total_messages": len([m for m in conversations.get(user_id, []) if m["role"] in ["user", "assistant"]])
         }
         
