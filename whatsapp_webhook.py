@@ -118,6 +118,11 @@ def analyze_image(image_data):
             print("❌ התמונה ריקה")
             return "התמונה ריקה או לא תקינה"
         
+        # בדוק שהתמונה לא קטנה מדי
+        if len(image_data) < 1000:
+            print("❌ התמונה קטנה מדי")
+            return "התמונה קטנה מדי לניתוח"
+        
         # המר לbase64
         base64_image = base64.b64encode(image_data).decode('utf-8')
         print(f"🔍 Base64 הומר: {len(base64_image)} characters")
@@ -131,7 +136,7 @@ def analyze_image(image_data):
                     "content": [
                         {
                             "type": "text",
-                            "text": "תאר מה אתה רואה בתמונה הזו בעברית בצורה מפורטת. אם זה קשור לעסק, לוגו, מוצר או שירות, תן פרטים רלוונטיים ליצירת דף נחיתה. תאר את הצבעים, הטקסטים, הסגנון והתחושה הכללית."
+                            "text": "תאר מה אתה רואה בתמונה הזו בעברית בצורה מפורטת. אם זה קשור לעסק, לוגו, מוצר או שירות, תן פרטים רלוונטיים ליצירת דף נחיתה. תאר את הצבעים, הטקסטים, הסגנון והתחושה הכללית. אם יש טקסט בתמונה, תעתיק אותו בדיוק."
                         },
                         {
                             "type": "image_url",
@@ -143,8 +148,8 @@ def analyze_image(image_data):
                     ]
                 }
             ],
-            max_tokens=1000,
-            temperature=0.3
+            max_tokens=1500,
+            temperature=0.2
         )
         
         result = response.choices[0].message.content
@@ -191,17 +196,36 @@ def whatsapp_webhook():
         
         # זיהוי תמונות - בדוק מספר דרכים
         is_image = False
+        
+        # הדפס את כל המידע לדיבוג
+        print(f"🔍 Debug - message_type: '{message_type}'")
+        print(f"🔍 Debug - payload keys: {list(payload.keys())}")
+        print(f"🔍 Debug - media: {payload.get('media', 'None')}")
+        print(f"🔍 Debug - body: {payload.get('body', 'None')}")
+        
+        # בדוק לפי type
         if message_type == "image":
             is_image = True
-            print("🖼️ זוהתה תמונה לפי type")
+            print("🖼️ זוהתה תמונה לפי type='image'")
         elif message_type in ["photo", "picture", "media"]:
             is_image = True
             print("🖼️ זוהתה תמונה לפי type אחר")
+        
+        # בדוק לפי media URL
         elif payload.get("media"):
             media_url = payload.get("media", "")
-            if any(img_type in media_url.lower() for img_type in ["image", "photo", "picture", "jpg", "jpeg", "png", "gif", "webp"]):
+            print(f"🔍 בדוק media URL: {media_url}")
+            if any(img_type in media_url.lower() for img_type in ["image", "photo", "picture", "jpg", "jpeg", "png", "gif", "webp", "bmp"]):
                 is_image = True
                 print("🖼️ זוהתה תמונה לפי media URL")
+        
+        # בדוק לפי body URL (לפעמים התמונה נשלחת ב-body)
+        elif payload.get("body") and payload.get("body").startswith("http"):
+            body_url = payload.get("body", "")
+            print(f"🔍 בדוק body URL: {body_url}")
+            if any(img_type in body_url.lower() for img_type in ["image", "photo", "picture", "jpg", "jpeg", "png", "gif", "webp", "bmp"]):
+                is_image = True
+                print("🖼️ זוהתה תמונה לפי body URL")
         
         if is_image:
             print("🖼️ מטפל בתמונה...")
@@ -297,6 +321,12 @@ def handle_image_message(payload, sender):
             return "Error", 500
         
         print(f"✅ הורדתי תמונה: {len(image_data)} bytes")
+        
+        # בדוק שהתמונה לא ריקה או קטנה מדי
+        if len(image_data) < 1000:  # פחות מקילובייט
+            print("⚠️ התמונה קטנה מדי או ריקה")
+            send_whatsapp_message(sender, "התמונה קטנה מדי או לא תקינה. נסה לשלוח תמונה אחרת.")
+            return "Error", 500
         
         # נתח את התמונה
         print("🔍 מנתח תמונה...")

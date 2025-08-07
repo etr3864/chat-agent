@@ -201,58 +201,42 @@ def should_end_conversation_naturally(user_message: str, conversation_history: l
     """בדוק אם השיחה צריכה להסתיים באופן טבעי"""
     user_message_lower = user_message.lower().strip()
     
-    # מילות סיום מפורשות
+    # מילות סיום מפורשות - רק ביטויים ברורים מאוד
     ending_phrases = [
-        "תודה רבה", "תודה", "שבוע טוב", "חג שמח", "בהצלחה",
+        "תודה רבה", "תודה רבה רבה", "שבוע טוב", "חג שמח", "בהצלחה",
         "נדבר", "נהיה בקשר", "אני אחזור אליך", "אני אחשוב על זה",
         "לילה טוב", "יום טוב", "שלום", "ביי", "להתראות",
-        "אני צריך לחשוב", "אני אבדוק", "אני אתייעץ", "סיימתי",
-        "זהו", "זה הכל", "זה הכל", "זהו זה", "זהו זה", "זהו זה",
-        "זהו זה", "זהו זה", "זהו זה", "זהו זה", "זהו זה"
+        "סיימתי", "זהו", "זה הכל", "זהו זה"
     ]
     
-    # בדוק אם יש ביטוי סיום
+    # בדוק אם יש ביטוי סיום מפורש
     for phrase in ending_phrases:
         if phrase in user_message_lower:
             return True
     
-    # בדוק אם השיחה ארוכה ויש סימנים של סיום
-    if len(conversation_history) > 10:
-        # אם המשתמש נותן תשובות קצרות או חד-משמעיות
-        short_responses = ["כן", "לא", "אוקיי", "בסדר", "נראה לי", "אולי"]
+    # בדוק אם השיחה ארוכה מאוד (יותר מ-30 הודעות) ויש סימנים של סיום
+    if len(conversation_history) > 30:
+        # אם המשתמש נותן תשובות קצרות מאוד ברציפות
+        short_responses = ["כן", "לא", "אוקיי", "בסדר"]
         if user_message_lower in short_responses:
-            # בדוק אם היו 2 תשובות קצרות ברציפות
+            # בדוק אם היו 3 תשובות קצרות ברציפות
             recent_user_messages = [
                 msg["content"].lower().strip() 
-                for msg in conversation_history[-4:] 
+                for msg in conversation_history[-6:] 
                 if msg["role"] == "user"
             ]
-            if len(recent_user_messages) >= 2 and all(
-                msg in short_responses or len(msg) < 10 
-                for msg in recent_user_messages[-2:]
+            if len(recent_user_messages) >= 3 and all(
+                msg in short_responses or len(msg) < 5 
+                for msg in recent_user_messages[-3:]
             ):
                 return True
     
     return False
 
-# בדיקה אם השיחה נעצרה פתאום
+# בדיקה אם השיחה נעצרה פתאום - מבוטל זמנית
 def should_end_conversation_abruptly(user_message: str, conversation_history: list) -> bool:
-    """בדוק אם השיחה נעצרה פתאום ויש לבצע סיכום"""
-    # אם השיחה ארוכה מאוד (יותר מ-20 הודעות) וההודעה האחרונה היא תמונה או תיאור תמונה
-    if len(conversation_history) > 20:
-        # בדוק אם ההודעה האחרונה היא תיאור תמונה (מכילה מילים כמו "תמונה", "רואים", "ניתן לראות")
-        image_indicators = ["תמונה", "רואים", "ניתן לראות", "בתמונה", "נראה", "נראה כאילו"]
-        user_message_lower = user_message.lower()
-        
-        for indicator in image_indicators:
-            if indicator in user_message_lower:
-                # בדוק אם הסוכן שאל שאלה אחרי התמונה
-                if conversation_history and conversation_history[-1]["role"] == "assistant":
-                    assistant_message = conversation_history[-1]["content"].lower()
-                    # אם הסוכן שאל שאלה אחרי התמונה, זה סימן שהשיחה נעצרה
-                    if "?" in assistant_message or "איך" in assistant_message or "מה" in assistant_message:
-                        return True
-    
+    """בדוק אם השיחה נעצרה פתאום ויש לבצע סיכום - מבוטל זמנית"""
+    # מבוטל זמנית כדי למנוע סגירת שיחות מיותרות
     return False
 
 # בדיקה ושיכום שיחות ישנות שלא קיבלו סיכום
