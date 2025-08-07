@@ -323,8 +323,8 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
         
         # הודעת סיום מקצועית
         return (
-            "מעולה! אני אכין עבורך הצעת מחיר מפורטת ואחזור אליך בקרוב. \n\n"
-            "👍 תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי 😊"
+            "אני אכין עבורך שאלון אפיון ואפתח בקשה למתכנת ולמעצב שלנו ואחזור אליך בקרוב. \n\n"
+            " תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי"
         )
     
     # בדוק אם השיחה נעצרה פתאום
@@ -335,8 +335,8 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
         
         # הודעת סיום מקצועית
         return (
-            "מעולה! אני אכין עבורך הצעת מחיר מפורטת ואחזור אליך בקרוב. \n\n"
-            "👍 תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי 😊"
+            "אני אכין לך שאלון אפיון ואפתח בשבילך פנייה לאחד המתכנתים שלנו ואחזור אליך בקרוב. \n\n"
+            " תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי"
         )
 
     # בדיקה אם עברנו את מגבלת ההודעות
