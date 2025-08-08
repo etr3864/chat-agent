@@ -7,7 +7,7 @@
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from conversation_summaries import summaries_manager
 
 def migrate_json_to_mongodb():
@@ -39,8 +39,8 @@ def migrate_json_to_mongodb():
     
     for user_id, summary in json_summaries.items():
         try:
-            # הוסף תאריך מיגרציה בפורמט UTC ISO 8601 עם דיוק של שניות
-            summary["migrated_at"] = datetime.now(timezone.utc).isoformat(timespec='seconds') + "Z"
+            # הוסף תאריך מיגרציה
+            summary["migrated_at"] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
             
             # שמור ב-MongoDB
             from mongodb_manager import mongodb_manager
