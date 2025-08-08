@@ -266,7 +266,7 @@ def whatsapp_webhook():
             print("🎤 זוהתה הודעה קולית לפי type")
         
         # בדוק לפי media URL
-        elif payload.get("media"):
+        elif payload.get("media") and payload.get("media").strip():
             media_url = payload.get("media", "")
             if any(audio_type in media_url.lower() for audio_type in ["audio", "voice", "ogg", "mp3", "wav", "m4a"]):
                 is_audio = True
@@ -278,6 +278,11 @@ def whatsapp_webhook():
             if any(audio_type in body_url.lower() for audio_type in ["audio", "voice", "ogg", "mp3", "wav", "m4a"]):
                 is_audio = True
                 print("🎤 זוהתה הודעה קולית לפי body URL")
+        
+        # בדיקה נוספת - אם יש טקסט רגיל, זה לא הודעה קולית
+        if payload.get("body") and not payload.get("body").startswith("http"):
+            print("📝 זוהתה הודעת טקסט רגילה")
+            is_audio = False
         
         if is_audio:
             print("🎤 מטפל בהודעה קולית...")
@@ -308,21 +313,24 @@ def handle_voice_message(payload, sender):
     try:
         # קבל URL של קובץ הקול - בדוק מספר מקומות
         audio_url = payload.get("media", "") or payload.get("body", "") or payload.get("url", "")
-        if not audio_url:
-            print("⚠️ URL של קובץ קול חסר")
+        if not audio_url or not audio_url.strip():
+            print("⚠️ URL של קובץ קול חסר או ריק")
             print(f"🔍 Debug - payload keys: {list(payload.keys())}")
+            print(f"🔍 Debug - media: '{payload.get('media', '')}'")
+            print(f"🔍 Debug - body: '{payload.get('body', '')}'")
+            print(f"🔍 Debug - url: '{payload.get('url', '')}'")
             return "Invalid", 400
         
         # הורד את קובץ הקול
         audio_data = download_file(audio_url)
         if not audio_data:
-            send_whatsapp_message(sender, "❌ לא הצלחתי להוריד את ההקלטה. נסה שוב.")
+            send_whatsapp_message(sender, "לא הצלחתי להוריד את ההקלטה. נסה לשלוח אותה שוב או שלח הודעה בטקסט.")
             return "Error", 500
         
         # תמלל את הקול
         transcribed_text = transcribe_audio(audio_data)
         if not transcribed_text:
-            send_whatsapp_message(sender, "לא הצלחתי לתמלל את ההקלטה. נסה שוב או שלח הודעה בטקסט.")
+            send_whatsapp_message(sender, "לא הצלחתי לתמלל את ההקלטה. נסה לדבר יותר ברור או שלח הודעה בטקסט.")
             return "Error", 500
         
         print(f"🎤 תמלול: {transcribed_text}")
@@ -342,9 +350,10 @@ def handle_voice_message(payload, sender):
             print("🎵 שולח תשובה קולית...")
             audio_sent = send_whatsapp_audio(sender, audio_response)
             if not audio_sent:
-                # אם שליחת האודיו נכשלה, שלח טקסט
+                # אם שליחת האודיו נכשלה, שלח טקסט עם הסבר
                 print("⚠️ שליחת אודיו נכשלה, שולח טקסט...")
-                send_whatsapp_message(sender, reply)
+                error_message = f"לא הצלחתי לשלוח תשובה קולית, אז אני עונה בטקסט:\n\n{reply}"
+                send_whatsapp_message(sender, error_message)
         else:
             # אם TTS נכשל, שלח טקסט
             print("⚠️ TTS נכשל, שולח טקסט...")
@@ -457,10 +466,19 @@ def send_whatsapp_audio(to, audio_data):
                 }
                 
                 response = requests.post(url, files=files, data=data)
-                print("🎵 הודעה קולית נשלחה:", response.text)
+                print("🎵 תגובת API:", response.text)
                 
                 # בדוק אם השליחה הצליחה
                 if response.status_code == 200:
+                    # בדוק שהתגובה לא מכילה שגיאה
+                    try:
+                        response_json = response.json()
+                        if "error" in response_json:
+                            print(f"❌ שגיאת API: {response_json['error']}")
+                            return False
+                    except:
+                        pass
+                    
                     print("✅ הודעה קולית נשלחה בהצלחה")
                     return True
                 else:
