@@ -122,7 +122,8 @@ def text_to_speech(text, language="he"):
             model="tts-1",
             voice="nova",  # קול נשי
             input=text,
-            speed=1.0
+            speed=1.0,
+            response_format="mp3"  # וודא שזה MP3
         )
         
         print(f"✅ קול נוצר בהצלחה: {len(response.content)} bytes")
@@ -350,10 +351,9 @@ def handle_voice_message(payload, sender):
             print("🎵 שולח תשובה קולית...")
             audio_sent = send_whatsapp_audio(sender, audio_response)
             if not audio_sent:
-                # אם שליחת האודיו נכשלה, שלח טקסט עם הסבר
+                # אם שליחת האודיו נכשלה, שלח טקסט רגיל
                 print("⚠️ שליחת אודיו נכשלה, שולח טקסט...")
-                error_message = f"לא הצלחתי לשלוח תשובה קולית, אז אני עונה בטקסט:\n\n{reply}"
-                send_whatsapp_message(sender, error_message)
+                send_whatsapp_message(sender, reply)
         else:
             # אם TTS נכשל, שלח טקסט
             print("⚠️ TTS נכשל, שולח טקסט...")
@@ -451,14 +451,17 @@ def send_whatsapp_audio(to, audio_data):
         print(f"🎵 שולח הודעה קולית: {len(audio_data)} bytes")
         
         # צור קובץ זמני לאודיו
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-            temp_file.write(audio_data)
-            temp_file.flush()
+        temp_file_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+                temp_file.write(audio_data)
+                temp_file.flush()
+                temp_file_path = temp_file.name
             
             # שלח את קובץ האודיו
             url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/audio"
             
-            with open(temp_file.name, 'rb') as audio_file:
+            with open(temp_file_path, 'rb') as audio_file:
                 files = {'audio': audio_file}
                 data = {
                     'token': TOKEN,
@@ -484,9 +487,11 @@ def send_whatsapp_audio(to, audio_data):
                 else:
                     print(f"⚠️ שגיאה בשליחת הודעה קולית: {response.status_code}")
                     return False
-            
-            # מחק קובץ זמני
-            os.unlink(temp_file.name)
+                    
+        finally:
+            # מחק קובץ זמני בסוף
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
             
     except Exception as e:
         print(f"❌ שגיאה בשליחת הודעה קולית: {e}")

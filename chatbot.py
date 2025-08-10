@@ -248,10 +248,10 @@ def check_and_summarize_old_conversations():
         # בדוק אם יש שיחה עם יותר מ-10 הודעות
         user_assistant_messages = [m for m in conversation if m["role"] in ["user", "assistant"]]
         if len(user_assistant_messages) >= 10:
-            # בדוק אם עבר זמן רב מההודעה האחרונה (יותר מ-5 דקות)
+            # בדוק אם עבר זמן רב מההודעה האחרונה (יותר משעה)
             if user_id in last_message_times:
                 time_diff = current_time - last_message_times[user_id]
-                if time_diff.total_seconds() > 300:  # 5 דקות
+                if time_diff.total_seconds() > 3600:  # שעה
                     # בדוק אם כבר יש סיכום בקובץ ה-JSON
                     try:
                         from conversation_summaries import summaries_manager
@@ -275,7 +275,7 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
         return (
             "🚫 הגעת למגבלת 50 הודעות בשיחה הזו.\n"
             "לא תוכל לשלוח הודעות נוספות.\n"
-            "נשמח להמשיך איתך טלפונית או בשיחה חדשה 🙌"
+            "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
         )
     
     # בדיקה אם עבר זמן רב מההודעה האחרונה
@@ -286,7 +286,7 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
         return (
             "⏰ עבר זמן רב מההודעה האחרונה שלך.\n"
             "סיכמתי את השיחה שלנו.\n"
-            "נשמח להמשיך איתך טלפונית או בשיחה חדשה 🙌"
+            "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
         )
     
     # אם אין שיחה קיימת – צור חדשה
@@ -332,7 +332,7 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
         return (
             "🚫 הגענו למגבלת 50 הודעות בשיחה הזו.\n"
             "לא תוכל לשלוח הודעות נוספות.\n"
-            "נשמח להמשיך איתך טלפונית או בשיחה חדשה 🙌"
+            "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
         )
 
     # שלח ל־GPT
