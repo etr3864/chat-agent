@@ -103,7 +103,30 @@ def summarize_conversation(user_id: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "סכם את השיח הזאת ותסביר כל מה שהבנת על צרכי הלקוח ומה מפריע לו ותן הנחיות ליועץ מה לעזור ללקוח ברמה הפסיכולוגית ותגיד לו איזה סוג לקוח הוא"},
+            {"role": "system", "content": """אתה מומחה לניתוח שיחות מכירה. סכם את השיחה הזו בצורה מפורטת ומקצועית.
+
+📋 מה לסכם:
+1. **מידע על העסק**: מה הם עושים, איזה שירות/מוצר
+2. **צרכים ורצונות**: מה הלקוח רוצה להשיג
+3. **בעיות וחששות**: מה מפריע לו או מה הוא חושש ממנו
+4. **מידע טכני**: לוגו, תמונות, עיצוב, סגנון
+5. **פרופיל לקוח**: גיל, מגדר, תחומי עניין
+6. **מוכנות לרכישה**: עד כמה הוא מוכן לקנות עכשיו
+
+🎯 הנחיות ליועץ:
+- איך לגשת ללקוח (פסיכולוגית)
+- מה הדגשים החשובים
+- איזה סוג לקוח זה (חם/חם-חם/קר)
+- מה המחיר שהם צריכים להציע
+- איך להתגבר על התנגדויות
+
+📊 סיכום קצר:
+- סטטוס: [חם/חם-חם/קר]
+- סיכוי מכירה: [גבוה/בינוני/נמוך]
+- זמן צפוי לסגירה: [מיד/שבוע/חודש]
+- מחיר מומלץ: [800/1000/1200]
+
+השתמש בעברית ברורה ומקצועית."""},
             {"role": "user", "content": text}
         ]
     )
@@ -206,7 +229,7 @@ def should_end_conversation_naturally(user_message: str, conversation_history: l
         "תודה רבה", "תודה רבה רבה", "שבוע טוב", "חג שמח", "בהצלחה",
         "נדבר", "נהיה בקשר", "אני אחזור אליך", "אני אחשוב על זה",
         "לילה טוב", "יום טוב", "שלום", "ביי", "להתראות",
-        "סיימתי", "זהו", "זה הכל", "זהו זה"
+        "סיימתי", "זהו", "זה הכל", "זהו זה", "זהו זהו"
     ]
     
     # בדוק אם יש ביטוי סיום מפורש
@@ -214,20 +237,20 @@ def should_end_conversation_naturally(user_message: str, conversation_history: l
         if phrase in user_message_lower:
             return True
     
-    # בדוק אם השיחה ארוכה מאוד (יותר מ-30 הודעות) ויש סימנים של סיום
-    if len(conversation_history) > 30:
+    # בדוק אם השיחה ארוכה מאוד (יותר מ-40 הודעות) ויש סימנים של סיום
+    if len(conversation_history) > 40:
         # אם המשתמש נותן תשובות קצרות מאוד ברציפות
-        short_responses = ["כן", "לא", "אוקיי", "בסדר"]
+        short_responses = ["כן", "לא", "אוקיי", "בסדר", "בטח"]
         if user_message_lower in short_responses:
-            # בדוק אם היו 3 תשובות קצרות ברציפות
+            # בדוק אם היו 4 תשובות קצרות ברציפות (במקום 3)
             recent_user_messages = [
                 msg["content"].lower().strip() 
-                for msg in conversation_history[-6:] 
+                for msg in conversation_history[-8:] 
                 if msg["role"] == "user"
             ]
-            if len(recent_user_messages) >= 3 and all(
+            if len(recent_user_messages) >= 4 and all(
                 msg in short_responses or len(msg) < 5 
-                for msg in recent_user_messages[-3:]
+                for msg in recent_user_messages[-4:]
             ):
                 return True
     
@@ -238,6 +261,97 @@ def should_end_conversation_abruptly(user_message: str, conversation_history: li
     """בדוק אם השיחה נעצרה פתאום ויש לבצע סיכום - מבוטל זמנית"""
     # מבוטל זמנית כדי למנוע סגירת שיחות מיותרות
     return False
+
+def has_enough_business_info(conversation_history: list) -> bool:
+    """בדוק אם יש מספיק מידע על העסק כדי להתקדם למכירה"""
+    # נדרש לפחות 6 הודעות משתמש כדי לאסוף מידע בסיסי
+    user_messages = [msg for msg in conversation_history if msg["role"] == "user"]
+    if len(user_messages) < 6:
+        return False
+    
+    # בדוק אם השיחה מכילה מידע על העסק
+    conversation_text = " ".join([msg["content"].lower() for msg in conversation_history])
+    
+    # מילות מפתח שמעידות על מידע עסקי
+    business_keywords = [
+        "עסק", "מוצר", "שירות", "חברה", "חנות", "מטרה", "מכירה", 
+        "לקוחות", "לוגו", "תמונות", "עיצוב", "סגנון", "מבדיל", "תחושה"
+    ]
+    
+    # צריך לפחות 3 מילות מפתח שונות
+    found_keywords = sum(1 for keyword in business_keywords if keyword in conversation_text)
+    
+    return found_keywords >= 3
+
+def should_proceed_to_sale(conversation_history: list) -> bool:
+    """בדוק אם אפשר להתקדם למכירה"""
+    # צריך מספיק מידע על העסק
+    if not has_enough_business_info(conversation_history):
+        return False
+    
+    # בדוק אם המשתמש הביע עניין או מוכנות
+    recent_messages = conversation_history[-4:]  # 4 ההודעות האחרונות
+    user_messages = [msg["content"].lower() for msg in recent_messages if msg["role"] == "user"]
+    
+    # מילות שמעידות על מוכנות
+    readiness_phrases = [
+        "אני מעוניין", "אני רוצה", "אני מוכן", "בוא נתקדם", "אוקיי", "בסדר",
+        "אני אקנה", "אני אתחיל", "בואו נתחיל", "אני מסכים", "זה נשמע טוב"
+    ]
+    
+    for message in user_messages:
+        for phrase in readiness_phrases:
+            if phrase in message:
+                return True
+    
+    return False
+
+def get_next_action_message(conversation_history: list) -> str:
+    """קבל הודעה מתאימה לשלב הבא בשיחה"""
+    
+    # בדוק אם יש מספיק מידע על העסק
+    if not has_enough_business_info(conversation_history):
+        # חסר מידע - המשך לאסוף
+        missing_info = get_missing_business_info(conversation_history)
+        return f"אני רוצה לוודא שאני מבין בדיוק מה אתה צריך. {missing_info}"
+    
+    # יש מספיק מידע - בדוק אם אפשר להתקדם למכירה
+    if should_proceed_to_sale(conversation_history):
+        return "מעולה! יש לי תמונה ברורה של מה שאתה צריך. בואו נסגור את זה?"
+    
+    # יש מידע אבל הלקוח לא מוכן - המשך לבנות אמון
+    return "אני רואה שיש לך עסק מעניין. בואו נדבר קצת יותר על איך הדף הזה יעזור לך להשיג את המטרות שלך."
+
+def get_missing_business_info(conversation_history: list) -> str:
+    """קבל הודעה על מה חסר מידע"""
+    conversation_text = " ".join([msg["content"].lower() for msg in conversation_history])
+    
+    missing_items = []
+    
+    if "עסק" not in conversation_text and "מוצר" not in conversation_text and "שירות" not in conversation_text:
+        missing_items.append("מה בדיוק העסק שלך עושה")
+    
+    if "מטרה" not in conversation_text and "מכירה" not in conversation_text:
+        missing_items.append("מה המטרה של הדף - מה אתה רוצה שהלקוחות יעשו")
+    
+    if "לוגו" not in conversation_text and "תמונות" not in conversation_text:
+        missing_items.append("איזה חומרים יש לך כבר - לוגו, תמונות")
+    
+    if "עיצוב" not in conversation_text and "סגנון" not in conversation_text:
+        missing_items.append("איזה סגנון עיצוב אתה אוהב")
+    
+    if "מבדיל" not in conversation_text and "יתרון" not in conversation_text:
+        missing_items.append("מה מבדל אותך מהמתחרים")
+    
+    if "לקוחות" not in conversation_text and "גיל" not in conversation_text:
+        missing_items.append("מי הלקוחות שלך - גיל, מגדר, תחומי עניין")
+    
+    if len(missing_items) == 1:
+        return f"אני צריך להבין {missing_items[0]}."
+    elif len(missing_items) == 2:
+        return f"אני צריך להבין {missing_items[0]} ו{missing_items[1]}."
+    else:
+        return f"אני צריך להבין עוד כמה דברים: {', '.join(missing_items[:-1])} ו{missing_items[-1]}."
 
 # בדיקה ושיכום שיחות ישנות שלא קיבלו סיכום
 def check_and_summarize_old_conversations():
@@ -301,15 +415,20 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     
     # בדוק אם השיחה צריכה להסתיים באופן טבעי
     if should_end_conversation_naturally(user_message, conversations[user_id]):
-        summary = summarize_conversation(user_id)
-        save_conversation_summary(user_id, summary)
-        save_conversation_to_file(user_id)
-        
-        # הודעת סיום מקצועית
-        return (
-            "אני אכין עבורך שאלון אפיון ואפתח בקשה למתכנת ולמעצב שלנו ואחזור אליך בקרוב. \n\n"
-            " תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי"
-        )
+        # בדוק אם יש מספיק מידע על העסק
+        if has_enough_business_info(conversations[user_id]):
+            summary = summarize_conversation(user_id)
+            save_conversation_summary(user_id, summary)
+            save_conversation_to_file(user_id)
+            
+            # הודעת סיום מקצועית רק כשיש מספיק מידע
+            return (
+                "אני אכין עבורך שאלון אפיון ואפתח בקשה למתכנת ולמעצב שלנו ואחזור אליך בקרוב.\n\n"
+                "תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי"
+            )
+        else:
+            # אם אין מספיק מידע, אל תסיים את השיחה - תן הודעה מתאימה
+            return get_next_action_message(conversations[user_id])
     
     # בדוק אם השיחה נעצרה פתאום
     if should_end_conversation_abruptly(user_message, conversations[user_id]):
@@ -319,8 +438,8 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
         
         # הודעת סיום מקצועית
         return (
-            "אני אכין לך שאלון אפיון ואפתח בשבילך פנייה לאחד המתכנתים שלנו ואחזור אליך בקרוב. \n\n"
-            " תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי"
+            "אני אכין לך שאלון אפיון ואפתח בשבילך פנייה לאחד המתכנתים שלנו ואחזור אליך בקרוב.\n\n"
+            "תודה על הזמן! אם יש שאלות או שינויים, פשוט תכתוב לי"
         )
 
     # בדיקה אם עברנו את מגבלת ההודעות

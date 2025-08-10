@@ -7,9 +7,10 @@
 
 import os
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, Union
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+from bson import ObjectId
 from dotenv import load_dotenv
 
 # טען משתני סביבה
@@ -60,9 +61,79 @@ class MongoDBManager:
             self.collection.create_index("customer_name")
             # אינדקס על תאריך
             self.collection.create_index("timestamp")
+            # אינדקס על שדה notified למניעת כפילויות
+            self.collection.create_index("notified")
             print("✅ אינדקסים נוצרו בהצלחה")
         except Exception as e:
             print(f"⚠️ שגיאה ביצירת אינדקסים: {e}")
+    
+    def _now_iso_utc(self) -> str:
+        """ISO 8601 UTC with Z (e.g. 2025-08-10T12:34:56.000Z)."""
+        # שימוש ב-%Y-%m-%dT%H:%M:%S.%fZ כדי לקבל 'Z' בסוף
+        return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    
+    def upsert_lead_with_notified(self, doc: Dict[str, Any]) -> None:
+        """
+        יוצר/מעדכן ליד לפי phone_number (או מזהה ייחודי אחר אם יש לכם),
+        שומר/מעדכן רק את השדות שמגיעים ב-doc (MongoDB לא מוחק שדות שלא הועברו ב-$set),
+        ומוודא שבמסמך חדש יתווסף notified=false.
+
+        - לא מוחק שדות קיימים (אנחנו משתמשים ב-$set רק למה שמגיע).
+        - במסמך חדש: $setOnInsert מוסיף notified=false ו-created_at.
+        - תמיד מעדכן updated_at ל-UTC ISO.
+        """
+        if not isinstance(doc, dict):
+            raise ValueError("doc must be a dict")
+
+        # מפתח לוגי לליד – החלף במקרה הצורך (למשל לפי _id אם אצלכם זה ה-key)
+        key = doc.get("phone_number")
+        if not key:
+            raise ValueError("doc must include 'phone_number' to upsert")
+
+        now = self._now_iso_utc()
+
+        # בונים את $set רק מהשדות שבאמת התקבלו ב-doc כדי לא 'לנגב' שדות אחרים
+        set_fields: Dict[str, Any] = dict(doc)  # העתקה רדודה של doc
+        set_fields["updated_at"] = now          # דואגים ש-UTC תמיד ישמר
+
+        # upsert לפי phone_number
+        self.collection.update_one(
+            {"phone_number": key},
+            {
+                # במסמך חדש בלבד: מוסיפים notified=false ושעת יצירה
+                "$setOnInsert": {"notified": False, "created_at": now},
+                # במסמך קיים או חדש: מעדכנים רק את השדות שסיפקנו (לא מוחק אחרים)
+                "$set": set_fields
+            },
+            upsert=True
+        )
+    
+    def mark_lead_notified(self, doc_id: Union[str, ObjectId]) -> None:
+        """
+        מסמן במסמך שקיימת הודעה/התראה שכבר יצאה: notified=true + notified_at.
+        לא משנה שדות אחרים.
+        """
+        oid = ObjectId(doc_id) if isinstance(doc_id, str) else doc_id
+        self.collection.update_one(
+            {"_id": oid},
+            {"$set": {"notified": True, "notified_at": self._now_iso_utc()}}
+        )
+    
+    def get_unnotified_leads(self) -> List[Dict]:
+        """קבל את כל הלידים שעדיין לא נשלחה להם התראה"""
+        if not self.is_connected():
+            print("❌ אין חיבור ל-MongoDB")
+            return []
+        
+        try:
+            unnotified_leads = list(self.collection.find(
+                {"notified": {"$ne": True}},
+                {"_id": 1, "phone_number": 1, "customer_name": 1, "summary": 1, "timestamp": 1, "notified": 1}
+            ).sort("timestamp", -1))
+            return unnotified_leads
+        except Exception as e:
+            print(f"❌ שגיאה בקבלת לידים שלא נשלחה להם התראה: {e}")
+            return []
     
     def is_connected(self) -> bool:
         """בדוק אם יש חיבור ל-MongoDB"""
@@ -75,21 +146,13 @@ class MongoDBManager:
             return False
         
         try:
-            # הוסף תאריך עדכון בפורמט ISO 8601 UTC
-            summary_data["updated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            # הוסף את מספר הטלפון למסמך
+            summary_data["phone_number"] = user_id
             
-            # עדכן או הוסף מסמך חדש
-            result = self.collection.update_one(
-                {"phone_number": user_id},
-                {"$set": summary_data},
-                upsert=True
-            )
+            # השתמש בפונקציה החדשה למניעת כפילויות
+            self.upsert_lead_with_notified(summary_data)
             
-            if result.upserted_id:
-                print(f"✅ סיכום חדש נשמר ב-MongoDB עבור {user_id}")
-            else:
-                print(f"✅ סיכום עודכן ב-MongoDB עבור {user_id}")
-            
+            print(f"✅ סיכום נשמר/עודכן ב-MongoDB עבור {user_id}")
             return True
             
         except Exception as e:

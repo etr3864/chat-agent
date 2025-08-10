@@ -18,6 +18,50 @@ if not os.path.exists(temp_dir):
     os.makedirs(temp_dir)
     print(f"📁 תיקיית temp נוצרה: {temp_dir}")
 
+# מילון לשמירת מצב הבוט לכל משתמש
+bot_active_status = {}
+
+def is_bot_active(user_id):
+    """בדוק אם הבוט פעיל למשתמש מסוים"""
+    return bot_active_status.get(user_id, True)  # ברירת מחדל: פעיל
+
+def set_bot_status(user_id, active):
+    """הגדר מצב הבוט למשתמש מסוים"""
+    bot_active_status[user_id] = active
+    print(f"🤖 בוט {'פעיל' if active else 'לא פעיל'} עבור משתמש: {user_id}")
+
+def handle_admin_commands(message, sender):
+    """טיפול בפקודות מנהל לשליטה בבוט"""
+    message_lower = message.lower().strip()
+    
+    # פקודה לעצירת הבוט
+    if message_lower in ["עצור", "עצור בוט", "stop", "stop bot", "הפסק", "הפסק בוט"]:
+        set_bot_status(sender, False)
+        return "🛑 הבוט הופסק עבורך. עכשיו אתה יכול לשלוח הודעות ידניות.\n\nכדי להחזיר את הבוט, שלח: 'מעכשיו ההתכתבות שלך תמשיך עם הבוט'"
+    
+    # פקודה להפעלת הבוט
+    elif message_lower == "מעכשיו ההתכתבות שלך תמשיך עם הבוט":
+        set_bot_status(sender, True)
+        return "✅ הבוט הופעל מחדש! עכשיו אני אענה על כל ההודעות שלך."
+    
+    # פקודה לבדיקת סטטוס
+    elif message_lower in ["סטטוס", "status", "מה המצב"]:
+        status = "פעיל" if is_bot_active(sender) else "לא פעיל"
+        return f"📊 מצב הבוט עבורך: {status}"
+    
+    # פקודה לעזרה
+    elif message_lower in ["עזרה", "help", "מה אני יכול לעשות"]:
+        return """🤖 פקודות זמינות:
+
+🛑 עצור/עצור בוט - עצור את הבוט
+✅ מעכשיו ההתכתבות שלך תמשיך עם הבוט - הפעל את הבוט
+📊 סטטוס - בדוק מצב הבוט
+❓ עזרה - הצג הודעה זו
+
+כשהבוט לא פעיל, אתה יכול לשלוח הודעות ידניות ללא הפרעה."""
+    
+    return None  # לא זוהו פקודות מנהל
+
 # טען משתני סביבה - ללא ברירת מחדל כדי לזהות בעיות
 try:
     INSTANCE_ID = os.environ["ULTRA_INSTANCE_ID"]
@@ -252,8 +296,8 @@ def transcribe_voice_message(file_url):
         traceback.print_exc()
         return None
 
-def create_tts_audio_arbor(text):
-    """צור אודיו באמצעות OpenAI TTS עם קול arbor"""
+def create_tts_audio_nova(text):
+    """צור אודיו באמצעות OpenAI TTS עם קול nova"""
     try:
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
@@ -265,11 +309,11 @@ def create_tts_audio_arbor(text):
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {len(text)} תווים")
         
-        print(f"🎵 יוצר קול עם arbor עבור: {text[:100]}...")
+        print(f"🎵 יוצר קול עם nova עבור: {text[:100]}...")
         
         response = client.audio.speech.create(
             model="tts-1",
-            voice="arbor",  # קול arbor כפי שביקשת
+            voice="nova",  # קול nova נתמך ב-OpenAI
             input=text,
             speed=1.0,
             response_format="mp3"  # וודא שזה MP3
@@ -281,7 +325,7 @@ def create_tts_audio_arbor(text):
         temp_file_path = None
         try:
             import uuid
-            filename = f"tts_arbor_{uuid.uuid4().hex[:8]}.mp3"
+            filename = f"tts_nova_{uuid.uuid4().hex[:8]}.mp3"
             temp_file_path = os.path.join(temp_dir, filename)
             
             with open(temp_file_path, 'wb') as temp_file:
@@ -462,6 +506,21 @@ def whatsapp_webhook():
             return "Invalid", 400
                 
         print(f"📩 הודעת טקסט מ-{sender}: {message}")
+        
+        # בדוק אם זו פקודת מנהל
+        admin_reply = handle_admin_commands(message, sender)
+        if admin_reply:
+            print(f"⚙️ פקודת מנהל זוהתה: {message}")
+            send_whatsapp_message(sender, admin_reply)
+            return "OK", 200
+        
+        # בדוק אם הבוט פעיל למשתמש זה
+        if not is_bot_active(sender):
+            print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה")
+            return "OK", 200  # לא שולח תשובה, אבל מקבל את ההודעה
+        
+        # הבוט פעיל - עבד את ההודעה
+        print(f"🤖 מעבד הודעה עם GPT...")
         reply = chat_with_gpt(message, user_id=sender)
         print(f"💬 תשובת GPT: {reply}")
         
@@ -475,7 +534,7 @@ def whatsapp_webhook():
         return "Error", 500
 
 def handle_voice_message(payload, sender):
-    """טיפול בהודעה קולית - משודרג עם TTS arbor ו-UltraMsg"""
+    """טיפול בהודעה קולית - משודרג עם TTS nova ו-UltraMsg"""
     try:
         print(f"🎤 מתחיל טיפול בהודעה קולית מ: {sender}")
         
@@ -501,14 +560,20 @@ def handle_voice_message(payload, sender):
         
         print(f"✅ תמלול הושלם: {transcribed_text}")
         
-        # 2. עבד את הטקסט המתומלל עם GPT
+        # 2. בדוק אם הבוט פעיל למשתמש זה
+        if not is_bot_active(sender):
+            print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה קולית")
+            send_whatsapp_message(sender, "הבוט לא פעיל כרגע. שלח 'מעכשיו ההתכתבות שלך תמשיך עם הבוט' כדי להפעיל אותו.")
+            return "OK", 200
+        
+        # 3. עבד את הטקסט המתומלל עם GPT
         print("🤖 מעבד עם GPT...")
         reply = chat_with_gpt(transcribed_text, user_id=sender)
         print(f"💬 תשובת GPT: {reply}")
         
-        # 3. צור תגובה קולית עם OpenAI TTS קול arbor
-        print("🎵 יוצר תגובה קולית עם קול arbor...")
-        audio_file_path = create_tts_audio_arbor(reply)
+        # 3. צור תגובה קולית עם OpenAI TTS קול nova
+        print("🎵 יוצר תגובה קולית עם קול nova...")
+        audio_file_path = create_tts_audio_nova(reply)
         if not audio_file_path:
             print("❌ יצירת אודיו נכשלה, שולח טקסט...")
             send_whatsapp_message(sender, reply)
