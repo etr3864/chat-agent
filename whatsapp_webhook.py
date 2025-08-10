@@ -348,7 +348,7 @@ def create_tts_audio_nova(text):
         return None
 
 def send_audio_via_ultramsg(to, audio_file_path, caption=""):
-    """שלח אודיו דרך UltraMsg API עם form-urlencoded"""
+    """שלח אודיו דרך UltraMsg API עם token כפרמטר GET"""
     try:
         if not audio_file_path or not os.path.exists(audio_file_path):
             print("❌ קובץ אודיו לא קיים")
@@ -356,20 +356,28 @@ def send_audio_via_ultramsg(to, audio_file_path, caption=""):
         
         print(f"🎵 שולח אודיו דרך UltraMsg ל: {to}")
         
-        # שלח את קובץ האודיו
+        # שלח את קובץ האודיו עם token כפרמטר GET
         url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/audio"
         
-        # השתמש ב-form-urlencoded כפי שביקשת
+        # הוסף את הטוקן כפרמטר GET
+        params = {
+            'token': TOKEN
+        }
+        
+        # שלח את הקובץ עם פרמטרים אחרים ב-data
         with open(audio_file_path, 'rb') as audio_file:
             files = {'audio': audio_file}
             data = {
-                'token': TOKEN,
                 'to': to,
                 'caption': caption
             }
             
             print(f"🎵 שולח עם פרמטרים: to={to}, caption={caption}")
-            response = requests.post(url, files=files, data=data)
+            print(f"🎵 URL עם token: {url}?token={TOKEN[:5]}*****")
+            print(f"🎵 פרמטרים GET: {params}")
+            print(f"🎵 נתונים: {data}")
+            
+            response = requests.post(url, files=files, data=data, params=params)
             print(f"🎵 תגובת UltraMsg API: {response.status_code}")
             print(f"🎵 תוכן תגובה: {response.text}")
             
@@ -681,12 +689,18 @@ def handle_image_message(payload, sender):
 def send_whatsapp_message(to, message):
     """שלח הודעת טקסט"""
     url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/chat"
+    
+    # הוסף את הטוקן כפרמטר GET
+    params = {
+        'token': TOKEN
+    }
+    
     payload = {
-        "token": TOKEN,
         "to": to,
         "body": message
     }
-    response = requests.post(url, data=payload)
+    
+    response = requests.post(url, data=payload, params=params)
     print("📤 הודעת טקסט נשלחה:", response.text)
 
 def send_whatsapp_audio(to, audio_data):
@@ -707,17 +721,21 @@ def send_whatsapp_audio(to, audio_data):
                 temp_file.flush()
                 temp_file_path = temp_file.name
             
-            # שלח את קובץ האודיו
+            # שלח את קובץ האודיו עם token כפרמטר GET
             url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/audio"
+            
+            # הוסף את הטוקן כפרמטר GET
+            params = {
+                'token': TOKEN
+            }
             
             with open(temp_file_path, 'rb') as audio_file:
                 files = {'audio': audio_file}
                 data = {
-                    'token': TOKEN,
                     'to': to
                 }
                 
-                response = requests.post(url, files=files, data=data)
+                response = requests.post(url, files=files, data=data, params=params)
                 print("🎵 תגובת API:", response.text)
                 
                 # בדוק אם השליחה הצליחה
