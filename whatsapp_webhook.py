@@ -19,7 +19,7 @@ import cloudinary.api
 
 # OpenAI TTS מודל מתקדם
 # gpt-4o-mini-tts הוא המודל העדכני ביותר להמרת טקסט לדיבור
-# קולות זמינים: alloy, echo, fable, onyx, nova, shimmer
+# קולות זמינים: alloy, shimmer, fable, onyx, nova, shimmer
 # איכות קול גבוהה יותר וזמני תגובה קצרים
 
 # טען משתני סביבה
@@ -470,7 +470,7 @@ def text_to_speech(text, language="he"):
         
         response = client.audio.speech.create(
             model="gpt-4o-mini-tts",
-            voice="echo",  # קול גברי מתקדם
+            voice="shimmer",  # קול גברי מתקדם
             input=text,
             speed=1.0,
             response_format="mp3"  # וודא שזה MP3
@@ -598,15 +598,15 @@ def transcribe_voice_message(file_url):
         traceback.print_exc()
         return None
 
-def create_tts_audio_echo(text, voice="echo"):
+def create_tts_audio_shimmer(text, voice="shimmer"):
     """צור אודיו באמצעות OpenAI TTS עם קול מתקדם - מחזיר bytes במקום נתיב לקובץ
     
     Args:
         text (str): הטקסט להמרה לדיבור
-        voice (str): הקול לבחירה - alloy, echo, fable, onyx, nova, shimmer
+        voice (str): הקול לבחירה - alloy, shimmer, fable, onyx, nova, shimmer
     """
     try:
-        print(f"🎵 מתחיל יצירת אודיו עם TTS echo (גברי)...")
+        print(f"🎵 מתחיל יצירת אודיו עם TTS shimmer (גברי)...")
         
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
@@ -619,13 +619,13 @@ def create_tts_audio_echo(text, voice="echo"):
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(text)} תווים")
         
-        print(f"🎵 יוצר קול עם echo (גברי) עבור: {text[:100]}...")
+        print(f"🎵 יוצר קול עם shimmer (גברי) עבור: {text[:100]}...")
         print(f"📊 אורך הטקסט הסופי: {len(text)} תווים")
         
         # הגדרות מיטביות ל-TTS
         tts_options = {
             "model": "gpt-4o-mini-tts",
-            "voice": "echo",  # קול גברי מתקדם
+            "voice": "shimmer",  # קול גברי מתקדם
             "input": text,
             "speed": 1.0,  # מהירות רגילה
             "response_format": "mp3"  # וודא שזה MP3
@@ -656,7 +656,7 @@ def create_tts_audio_echo(text, voice="echo"):
             # נסה לקצר את הטקסט
             shortened_text = text[:2000] + "..."
             print(f"🔄 מנסה עם טקסט מקוצר: {len(shortened_text)} תווים")
-            return create_tts_audio_echo(shortened_text)
+            return create_tts_audio_shimmer(shortened_text)
         
         print(f"🎵 קובץ MP3 מוכן לשליחה: {len(audio_bytes)} bytes")
         
@@ -1558,11 +1558,11 @@ def handle_voice_message(payload, sender):
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
-        # 4. צור תגובה קולית עם OpenAI TTS קול echo (גברי)
-        print("🎵 יוצר תגובה קולית עם קול echo (גברי)...")
+        # 4. צור תגובה קולית עם OpenAI TTS קול shimmer (גברי)
+        print("🎵 יוצר תגובה קולית עם קול shimmer (גברי)...")
         audio_bytes = None
         try:
-            audio_bytes = create_tts_audio_echo(reply)
+            audio_bytes = create_tts_audio_shimmer(reply)
         except Exception as e:
             print(f"❌ שגיאה ביצירת אודיו: {e}")
             import traceback
