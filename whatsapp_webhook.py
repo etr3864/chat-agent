@@ -465,7 +465,7 @@ def text_to_speech(text, language="he"):
         
         response = client.audio.speech.create(
             model="tts-1",
-            voice="nova",  # קול נשי
+            voice="alloy",  # קול גברי
             input=text,
             speed=1.0,
             response_format="mp3"  # וודא שזה MP3
@@ -593,10 +593,10 @@ def transcribe_voice_message(file_url):
         traceback.print_exc()
         return None
 
-def create_tts_audio_nova(text):
-    """צור אודיו באמצעות OpenAI TTS עם קול nova - מחזיר bytes במקום נתיב לקובץ"""
+def create_tts_audio_alloy(text):
+    """צור אודיו באמצעות OpenAI TTS עם קול alloy (גברי) - מחזיר bytes במקום נתיב לקובץ"""
     try:
-        print(f"🎵 מתחיל יצירת אודיו עם TTS nova...")
+        print(f"🎵 מתחיל יצירת אודיו עם TTS alloy (גברי)...")
         
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
@@ -609,13 +609,13 @@ def create_tts_audio_nova(text):
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(text)} תווים")
         
-        print(f"🎵 יוצר קול עם nova עבור: {text[:100]}...")
+        print(f"🎵 יוצר קול עם alloy (גברי) עבור: {text[:100]}...")
         print(f"📊 אורך הטקסט הסופי: {len(text)} תווים")
         
         # הגדרות מיטביות ל-TTS
         tts_options = {
             "model": "tts-1",
-            "voice": "nova",  # קול nova נתמך ב-OpenAI
+            "voice": "alloy",  # קול גברי
             "input": text,
             "speed": 1.0,  # מהירות רגילה
             "response_format": "mp3"  # וודא שזה MP3
@@ -1548,8 +1548,8 @@ def handle_voice_message(payload, sender):
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
-        # 4. צור תגובה קולית עם OpenAI TTS קול nova
-        print("🎵 יוצר תגובה קולית עם קול nova...")
+        # 4. צור תגובה קולית עם OpenAI TTS קול alloy (גברי)
+        print("🎵 יוצר תגובה קולית עם קול alloy (גברי)...")
         try:
             audio_bytes = create_tts_audio_nova(reply)
             if not audio_bytes:
