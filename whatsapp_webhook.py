@@ -17,6 +17,11 @@ import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 
+# OpenAI TTS מודל מתקדם
+# gpt-4o-mini-tts הוא המודל העדכני ביותר להמרת טקסט לדיבור
+# קולות זמינים: alloy, echo, fable, onyx, nova, shimmer
+# איכות קול גבוהה יותר וזמני תגובה קצרים
+
 # טען משתני סביבה
 load_dotenv()
 
@@ -464,8 +469,8 @@ def text_to_speech(text, language="he"):
         print(f"🎵 יוצר קול עבור: {text[:100]}...")
         
         response = client.audio.speech.create(
-            model="tts-1",
-            voice="echo",  # קול גברי
+            model="gpt-4o-mini-tts",
+            voice="echo",  # קול גברי מתקדם
             input=text,
             speed=1.0,
             response_format="mp3"  # וודא שזה MP3
@@ -593,8 +598,13 @@ def transcribe_voice_message(file_url):
         traceback.print_exc()
         return None
 
-def create_tts_audio_echo(text):
-    """צור אודיו באמצעות OpenAI TTS עם קול echo (גברי) - מחזיר bytes במקום נתיב לקובץ"""
+def create_tts_audio_echo(text, voice="echo"):
+    """צור אודיו באמצעות OpenAI TTS עם קול מתקדם - מחזיר bytes במקום נתיב לקובץ
+    
+    Args:
+        text (str): הטקסט להמרה לדיבור
+        voice (str): הקול לבחירה - alloy, echo, fable, onyx, nova, shimmer
+    """
     try:
         print(f"🎵 מתחיל יצירת אודיו עם TTS echo (גברי)...")
         
@@ -614,8 +624,8 @@ def create_tts_audio_echo(text):
         
         # הגדרות מיטביות ל-TTS
         tts_options = {
-            "model": "tts-1",
-            "voice": "echo",  # קול גברי
+            "model": "gpt-4o-mini-tts",
+            "voice": "echo",  # קול גברי מתקדם
             "input": text,
             "speed": 1.0,  # מהירות רגילה
             "response_format": "mp3"  # וודא שזה MP3
