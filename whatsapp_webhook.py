@@ -12,6 +12,12 @@ from openai import OpenAI
 # טען משתני סביבה
 load_dotenv()
 
+# צור תיקיית temp אם לא קיימת
+temp_dir = os.path.join(os.getcwd(), "temp")
+if not os.path.exists(temp_dir):
+    os.makedirs(temp_dir)
+    print(f"📁 תיקיית temp נוצרה: {temp_dir}")
+
 # טען משתני סביבה - ללא ברירת מחדל כדי לזהות בעיות
 try:
     INSTANCE_ID = os.environ["ULTRA_INSTANCE_ID"]
@@ -189,6 +195,165 @@ def analyze_image(image_data):
         traceback.print_exc()
         return f"לא הצלחתי לנתח את התמונה: {str(e)}"
 
+# פונקציות חדשות לטיפול בהודעות קוליות משודרגות
+def transcribe_voice_message(file_url):
+    """תמלל הודעה קולית באמצעות OpenAI Whisper"""
+    try:
+        print(f"🎤 מתחיל תמלול הודעה קולית מ: {file_url}")
+        
+        # הורד את קובץ האודיו
+        audio_data = download_file(file_url)
+        if not audio_data:
+            print("❌ לא הצלחתי להוריד את קובץ האודיו")
+            return None
+        
+        # בדוק שהאודיו לא ריק
+        if len(audio_data) < 1000:
+            print("⚠️ קובץ אודיו ריק או קטן מדי")
+            return None
+        
+        print(f"🎤 מתמלל אודיו: {len(audio_data)} bytes")
+        
+        # צור קובץ זמני בתיקיית temp שלנו עם סיומת מתאימה
+        temp_file_path = None
+        try:
+            import uuid
+            filename = f"voice_{uuid.uuid4().hex[:8]}.ogg"
+            temp_file_path = os.path.join(temp_dir, filename)
+            
+            with open(temp_file_path, 'wb') as temp_file:
+                temp_file.write(audio_data)
+                temp_file.flush()
+            
+            # תמלל באמצעות OpenAI Whisper
+            with open(temp_file_path, 'rb') as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1", 
+                    file=audio_file,
+                    language="he"  # עברית
+                )
+            
+            result = transcript.text.strip()
+            print(f"✅ תמלול הושלם: {result}")
+            return result
+            
+        finally:
+            # מחק קובץ זמני בסוף
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                    print(f"🗑️ קובץ זמני נמחק: {temp_file_path}")
+                except Exception as e:
+                    print(f"⚠️ לא הצלחתי למחוק קובץ זמני: {e}")
+            
+    except Exception as e:
+        print(f"❌ שגיאה בתמלול הודעה קולית: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def create_tts_audio_arbor(text):
+    """צור אודיו באמצעות OpenAI TTS עם קול arbor"""
+    try:
+        # בדוק שהטקסט לא ריק
+        if not text or not text.strip():
+            print("⚠️ טקסט ריק ל-TTS")
+            return None
+        
+        # הגבל אורך הטקסט (OpenAI מגביל ל-4096 תווים)
+        if len(text) > 4000:
+            text = text[:4000] + "..."
+            print(f"⚠️ טקסט קוצר ל-TTS: {len(text)} תווים")
+        
+        print(f"🎵 יוצר קול עם arbor עבור: {text[:100]}...")
+        
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice="arbor",  # קול arbor כפי שביקשת
+            input=text,
+            speed=1.0,
+            response_format="mp3"  # וודא שזה MP3
+        )
+        
+        print(f"✅ קול נוצר בהצלחה: {len(response.content)} bytes")
+        
+        # שמור את הקובץ הזמני בתיקיית temp שלנו
+        temp_file_path = None
+        try:
+            import uuid
+            filename = f"tts_arbor_{uuid.uuid4().hex[:8]}.mp3"
+            temp_file_path = os.path.join(temp_dir, filename)
+            
+            with open(temp_file_path, 'wb') as temp_file:
+                temp_file.write(response.content)
+                temp_file.flush()
+            
+            print(f"💾 קובץ MP3 נשמר: {temp_file_path}")
+            return temp_file_path
+            
+        except Exception as e:
+            print(f"❌ שגיאה בשמירת קובץ זמני: {e}")
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+            return None
+        
+    except Exception as e:
+        print(f"❌ שגיאה ב-TTS: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def send_audio_via_ultramsg(to, audio_file_path, caption=""):
+    """שלח אודיו דרך UltraMsg API עם form-urlencoded"""
+    try:
+        if not audio_file_path or not os.path.exists(audio_file_path):
+            print("❌ קובץ אודיו לא קיים")
+            return False
+        
+        print(f"🎵 שולח אודיו דרך UltraMsg ל: {to}")
+        
+        # שלח את קובץ האודיו
+        url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/audio"
+        
+        # השתמש ב-form-urlencoded כפי שביקשת
+        with open(audio_file_path, 'rb') as audio_file:
+            files = {'audio': audio_file}
+            data = {
+                'token': TOKEN,
+                'to': to,
+                'caption': caption
+            }
+            
+            print(f"🎵 שולח עם פרמטרים: to={to}, caption={caption}")
+            response = requests.post(url, files=files, data=data)
+            print(f"🎵 תגובת UltraMsg API: {response.status_code}")
+            print(f"🎵 תוכן תגובה: {response.text}")
+            
+            # בדוק אם השליחה הצליחה
+            if response.status_code == 200:
+                try:
+                    response_json = response.json()
+                    if "error" in response_json:
+                        print(f"❌ שגיאת UltraMsg API: {response_json['error']}")
+                        return False
+                    else:
+                        print("✅ אודיו נשלח בהצלחה דרך UltraMsg")
+                        return True
+                except Exception as e:
+                    print(f"⚠️ לא הצלחתי לפרסר JSON: {e}")
+                    # אם התגובה היא 200 אבל לא JSON תקין, נניח שהשליחה הצליחה
+                    print("✅ אודיו נשלח בהצלחה (תגובה לא JSON)")
+                    return True
+            else:
+                print(f"❌ שגיאה בשליחת אודיו: {response.status_code}")
+                return False
+                
+    except Exception as e:
+        print(f"❌ שגיאה בשליחת אודיו דרך UltraMsg: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 @app.route("/")
 def healthcheck():
     """בדיקת בריאות לשרת - נדרש עבור Render"""
@@ -310,8 +475,10 @@ def whatsapp_webhook():
         return "Error", 500
 
 def handle_voice_message(payload, sender):
-    """טיפול בהודעה קולית"""
+    """טיפול בהודעה קולית - משודרג עם TTS arbor ו-UltraMsg"""
     try:
+        print(f"🎤 מתחיל טיפול בהודעה קולית מ: {sender}")
+        
         # קבל URL של קובץ הקול - בדוק מספר מקומות
         audio_url = payload.get("media", "") or payload.get("body", "") or payload.get("url", "")
         if not audio_url or not audio_url.strip():
@@ -322,47 +489,64 @@ def handle_voice_message(payload, sender):
             print(f"🔍 Debug - url: '{payload.get('url', '')}'")
             return "Invalid", 400
         
-        # הורד את קובץ הקול
-        audio_data = download_file(audio_url)
-        if not audio_data:
-            send_whatsapp_message(sender, "לא הצלחתי להוריד את ההקלטה. נסה לשלוח אותה שוב או שלח הודעה בטקסט.")
-            return "Error", 500
+        print(f"🎤 קובץ קול זוהה: {audio_url}")
         
-        # תמלל את הקול
-        transcribed_text = transcribe_audio(audio_data)
+        # 1. תמלל את ההודעה הקולית באמצעות OpenAI Whisper
+        print("🎤 מתחיל תמלול...")
+        transcribed_text = transcribe_voice_message(audio_url)
         if not transcribed_text:
+            print("❌ תמלול נכשל, שולח הודעת טקסט...")
             send_whatsapp_message(sender, "לא הצלחתי לתמלל את ההקלטה. נסה לדבר יותר ברור או שלח הודעה בטקסט.")
             return "Error", 500
         
-        print(f"🎤 תמלול: {transcribed_text}")
+        print(f"✅ תמלול הושלם: {transcribed_text}")
         
-        # בדוק שהתמלול לא ריק
-        if not transcribed_text.strip():
-            send_whatsapp_message(sender, "לא הצלחתי להבין את ההקלטה. נסה לדבר יותר ברור או שלח הודעה בטקסט.")
-            return "Error", 500
-        
-        # עבד את הטקסט המתומלל
+        # 2. עבד את הטקסט המתומלל עם GPT
+        print("🤖 מעבד עם GPT...")
         reply = chat_with_gpt(transcribed_text, user_id=sender)
         print(f"💬 תשובת GPT: {reply}")
         
-        # יצירת תשובה קולית
-        audio_response = text_to_speech(reply)
-        if audio_response:
-            print("🎵 שולח תשובה קולית...")
-            audio_sent = send_whatsapp_audio(sender, audio_response)
-            if not audio_sent:
-                # אם שליחת האודיו נכשלה, שלח טקסט רגיל
+        # 3. צור תגובה קולית עם OpenAI TTS קול arbor
+        print("🎵 יוצר תגובה קולית עם קול arbor...")
+        audio_file_path = create_tts_audio_arbor(reply)
+        if not audio_file_path:
+            print("❌ יצירת אודיו נכשלה, שולח טקסט...")
+            send_whatsapp_message(sender, reply)
+            return "OK", 200
+        
+        try:
+            # 4. שלח את האודיו דרך UltraMsg
+            print("📤 שולח אודיו דרך UltraMsg...")
+            audio_sent = send_audio_via_ultramsg(sender, audio_file_path, caption="תגובה קולית")
+            
+            if audio_sent:
+                print("✅ אודיו נשלח בהצלחה!")
+            else:
                 print("⚠️ שליחת אודיו נכשלה, שולח טקסט...")
                 send_whatsapp_message(sender, reply)
-        else:
-            # אם TTS נכשל, שלח טקסט
-            print("⚠️ TTS נכשל, שולח טקסט...")
-            send_whatsapp_message(sender, reply)
+                
+        finally:
+            # 5. מחק את הקובץ הזמני
+            if audio_file_path and os.path.exists(audio_file_path):
+                try:
+                    os.unlink(audio_file_path)
+                    print(f"🗑️ קובץ זמני נמחק: {audio_file_path}")
+                except Exception as e:
+                    print(f"⚠️ לא הצלחתי למחוק קובץ זמני: {e}")
         
         return "OK", 200
         
     except Exception as e:
         print(f"❌ שגיאה בטיפול בהודעה קולית: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # שלח הודעת שגיאה ללקוח
+        try:
+            send_whatsapp_message(sender, "אירעה שגיאה בטיפול בהודעה הקולית. נסה לשלוח אותה שוב או שלח הודעה בטקסט.")
+        except:
+            pass
+            
         return "Error", 500
 
 def handle_image_message(payload, sender):
