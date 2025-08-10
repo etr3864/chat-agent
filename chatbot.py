@@ -349,7 +349,9 @@ def get_missing_business_info(conversation_history: list) -> str:
     if "לקוחות" not in conversation_text and "גיל" not in conversation_text:
         missing_items.append("מי הלקוחות שלך - גיל, מגדר, תחומי עניין")
     
-    if len(missing_items) == 1:
+    if len(missing_items) == 0:
+        return "מעולה! יש לי את כל המידע שאני צריך על העסק שלך."
+    elif len(missing_items) == 1:
         return f"אני צריך להבין {missing_items[0]}."
     elif len(missing_items) == 2:
         return f"אני צריך להבין {missing_items[0]} ו{missing_items[1]}."

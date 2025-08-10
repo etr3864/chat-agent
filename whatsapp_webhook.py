@@ -465,7 +465,7 @@ def text_to_speech(text, language="he"):
         
         response = client.audio.speech.create(
             model="tts-1",
-            voice="alloy",  # קול גברי
+            voice="echo",  # קול גברי
             input=text,
             speed=1.0,
             response_format="mp3"  # וודא שזה MP3
@@ -593,10 +593,10 @@ def transcribe_voice_message(file_url):
         traceback.print_exc()
         return None
 
-def create_tts_audio_alloy(text):
-    """צור אודיו באמצעות OpenAI TTS עם קול alloy (גברי) - מחזיר bytes במקום נתיב לקובץ"""
+def create_tts_audio_echo(text):
+    """צור אודיו באמצעות OpenAI TTS עם קול echo (גברי) - מחזיר bytes במקום נתיב לקובץ"""
     try:
-        print(f"🎵 מתחיל יצירת אודיו עם TTS alloy (גברי)...")
+        print(f"🎵 מתחיל יצירת אודיו עם TTS echo (גברי)...")
         
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
@@ -609,13 +609,13 @@ def create_tts_audio_alloy(text):
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(text)} תווים")
         
-        print(f"🎵 יוצר קול עם alloy (גברי) עבור: {text[:100]}...")
+        print(f"🎵 יוצר קול עם echo (גברי) עבור: {text[:100]}...")
         print(f"📊 אורך הטקסט הסופי: {len(text)} תווים")
         
         # הגדרות מיטביות ל-TTS
         tts_options = {
             "model": "tts-1",
-            "voice": "alloy",  # קול גברי
+            "voice": "echo",  # קול גברי
             "input": text,
             "speed": 1.0,  # מהירות רגילה
             "response_format": "mp3"  # וודא שזה MP3
@@ -646,7 +646,7 @@ def create_tts_audio_alloy(text):
             # נסה לקצר את הטקסט
             shortened_text = text[:2000] + "..."
             print(f"🔄 מנסה עם טקסט מקוצר: {len(shortened_text)} תווים")
-            return create_tts_audio_nova(shortened_text)
+            return create_tts_audio_echo(shortened_text)
         
         print(f"🎵 קובץ MP3 מוכן לשליחה: {len(audio_bytes)} bytes")
         
@@ -1548,20 +1548,18 @@ def handle_voice_message(payload, sender):
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
-        # 4. צור תגובה קולית עם OpenAI TTS קול alloy (גברי)
-        print("🎵 יוצר תגובה קולית עם קול alloy (גברי)...")
+        # 4. צור תגובה קולית עם OpenAI TTS קול echo (גברי)
+        print("🎵 יוצר תגובה קולית עם קול echo (גברי)...")
+        audio_bytes = None
         try:
-            audio_bytes = create_tts_audio_nova(reply)
-            if not audio_bytes:
-                print("❌ יצירת אודיו נכשלה, שולח טקסט...")
-                # חישוב עיכוב חכם לפני שליחת טקסט
-                delay = calculate_smart_delay(len(reply), "text")
-                print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
-                time.sleep(delay)
-                send_whatsapp_message(sender, reply)
-                return "OK", 200
+            audio_bytes = create_tts_audio_echo(reply)
         except Exception as e:
-            print(f"❌ שגיאה ביצירת אודיו: {e}, שולח טקסט...")
+            print(f"❌ שגיאה ביצירת אודיו: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        if not audio_bytes:
+            print("❌ יצירת אודיו נכשלה, שולח טקסט...")
             # חישוב עיכוב חכם לפני שליחת טקסט
             delay = calculate_smart_delay(len(reply), "text")
             print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
@@ -1618,17 +1616,23 @@ def handle_voice_message(payload, sender):
         import traceback
         traceback.print_exc()
         
-        # שלח הודעת שגיאה ללקוח
+        # במקום לחזור הודעת שגיאה, נחזור תשובה בטקסט
         try:
-            # חישוב עיכוב חכם לפני שליחת הודעת שגיאה
-            delay = calculate_smart_delay(80, "text")  # הודעת שגיאה ארוכה
-            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת הודעת שגיאה...")
+            print("🔄 מנסה לחזור תשובה בטקסט במקום אודיו...")
+            # חישוב עיכוב חכם לפני שליחת טקסט
+            delay = calculate_smart_delay(len(reply) if 'reply' in locals() else 100, "text")
+            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
             time.sleep(delay)
-            send_whatsapp_message(sender, "אירעה שגיאה בטיפול בהודעה הקולית. נסה לשלוח אותה שוב או שלח הודעה בטקסט.")
-        except:
-            pass
+            
+            # נסה לשלוח את התשובה המקורית או הודעת ברירת מחדל
+            if 'reply' in locals() and reply:
+                send_whatsapp_message(sender, reply)
+            else:
+                send_whatsapp_message(sender, "אני מתנצל, לא הצלחתי לעבד את ההודעה הקולית. נסה לשלוח אותה שוב או שלח הודעה בטקסט.")
+        except Exception as fallback_error:
+            print(f"❌ שגיאה גם בשליחת טקסט: {fallback_error}")
         
-        return "Error", 500
+        return "OK", 200  # נחזור OK במקום Error
 
 def handle_image_message(payload, sender):
     """טיפול בתמונה"""
