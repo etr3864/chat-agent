@@ -4,7 +4,7 @@ import requests
 import os
 import json
 import base64
-import tempfile
+# לא צריכים tempfile יותר - משתמשים ב-BytesIO
 from io import BytesIO
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -12,11 +12,7 @@ from openai import OpenAI
 # טען משתני סביבה
 load_dotenv()
 
-# צור תיקיית temp אם לא קיימת
-temp_dir = os.path.join(os.getcwd(), "temp")
-if not os.path.exists(temp_dir):
-    os.makedirs(temp_dir)
-    print(f"📁 תיקיית temp נוצרה: {temp_dir}")
+# לא צריכים תיקיית temp יותר - שולחים אודיו ישירות מה-bytes
 
 # מילון לשמירת מצב הבוט לכל משתמש
 bot_active_status = {}
@@ -206,25 +202,21 @@ def transcribe_audio(audio_data):
         
         print(f"🎤 מתמלל אודיו: {len(audio_data)} bytes")
         
-        # צור קובץ זמני
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_file:
-            temp_file.write(audio_data)
-            temp_file.flush()
-            
-            # תמלל באמצעות OpenAI
-            with open(temp_file.name, 'rb') as audio_file:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=audio_file,
-                    language="he"  # עברית
-                )
-            
-            # מחק קובץ זמני
-            os.unlink(temp_file.name)
-            
-            result = transcript.text.strip()
-            print(f"✅ תמלול הושלם: {result}")
-            return result
+        # השתמש ב-BytesIO במקום קובץ זמני
+        from io import BytesIO
+        audio_file = BytesIO(audio_data)
+        audio_file.name = "audio.ogg"
+        
+        # תמלל באמצעות OpenAI
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1", 
+            file=audio_file,
+            language="he"  # עברית
+        )
+        
+        result = transcript.text.strip()
+        print(f"✅ תמלול הושלם: {result}")
+        return result
             
     except Exception as e:
         print(f"❌ שגיאה בתמלול: {e}")
@@ -337,37 +329,21 @@ def transcribe_voice_message(file_url):
         
         print(f"🎤 מתמלל אודיו: {len(audio_data)} bytes")
         
-        # צור קובץ זמני בתיקיית temp שלנו עם סיומת מתאימה
-        temp_file_path = None
-        try:
-            import uuid
-            filename = f"voice_{uuid.uuid4().hex[:8]}.ogg"
-            temp_file_path = os.path.join(temp_dir, filename)
-            
-            with open(temp_file_path, 'wb') as temp_file:
-                temp_file.write(audio_data)
-                temp_file.flush()
-            
-            # תמלל באמצעות OpenAI Whisper
-            with open(temp_file_path, 'rb') as audio_file:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=audio_file,
-                    language="he"  # עברית
-                )
-            
-            result = transcript.text.strip()
-            print(f"✅ תמלול הושלם: {result}")
-            return result
-            
-        finally:
-            # מחק קובץ זמני בסוף
-            if temp_file_path and os.path.exists(temp_file_path):
-                try:
-                    os.unlink(temp_file_path)
-                    print(f"🗑️ קובץ זמני נמחק: {temp_file_path}")
-                except Exception as e:
-                    print(f"⚠️ לא הצלחתי למחוק קובץ זמני: {e}")
+        # השתמש ב-BytesIO במקום קובץ זמני
+        from io import BytesIO
+        audio_file = BytesIO(audio_data)
+        audio_file.name = "voice.ogg"  # שם הקובץ לזיהוי סוג הקובץ
+        
+        # תמלול באמצעות OpenAI Whisper
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1", 
+            file=audio_file,
+            language="he"  # עברית
+        )
+        
+        result = transcript.text.strip()
+        print(f"✅ תמלול הושלם: {result}")
+        return result
             
     except Exception as e:
         print(f"❌ שגיאה בתמלול הודעה קולית: {e}")
@@ -376,7 +352,7 @@ def transcribe_voice_message(file_url):
         return None
 
 def create_tts_audio_nova(text):
-    """צור אודיו באמצעות OpenAI TTS עם קול nova"""
+    """צור אודיו באמצעות OpenAI TTS עם קול nova - מחזיר bytes במקום נתיב לקובץ"""
     try:
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
@@ -400,25 +376,8 @@ def create_tts_audio_nova(text):
         
         print(f"✅ קול נוצר בהצלחה: {len(response.content)} bytes")
         
-        # שמור את הקובץ הזמני בתיקיית temp שלנו
-        temp_file_path = None
-        try:
-            import uuid
-            filename = f"tts_nova_{uuid.uuid4().hex[:8]}.mp3"
-            temp_file_path = os.path.join(temp_dir, filename)
-            
-            with open(temp_file_path, 'wb') as temp_file:
-                temp_file.write(response.content)
-                temp_file.flush()
-            
-            print(f"💾 קובץ MP3 נשמר: {temp_file_path}")
-            return temp_file_path
-            
-        except Exception as e:
-            print(f"❌ שגיאה בשמירת קובץ זמני: {e}")
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-            return None
+        # מחזיר את ה-bytes ישירות - ללא שמירת קובץ זמני
+        return response.content
         
     except Exception as e:
         print(f"❌ שגיאה ב-TTS: {e}")
@@ -426,16 +385,16 @@ def create_tts_audio_nova(text):
         traceback.print_exc()
         return None
 
-def send_audio_via_ultramsg(to, audio_file_path, caption=""):
-    """שלח אודיו דרך UltraMsg API עם token כפרמטר GET"""
+def send_audio_via_ultramsg(to, audio_bytes, caption=""):
+    """שלח אודיו דרך UltraMsg API ישירות מה-bytes - ללא שמירת קובץ זמני"""
     try:
-        if not audio_file_path or not os.path.exists(audio_file_path):
-            print("❌ קובץ אודיו לא קיים")
+        if not audio_bytes:
+            print("❌ נתוני אודיו חסרים")
             return False
         
         print(f"🎵 שולח אודיו דרך UltraMsg ל: {to}")
         
-        # שלח את קובץ האודיו עם token כפרמטר GET
+        # שלח את האודיו עם token כפרמטר GET
         url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/audio"
         
         # הוסף את הטוקן כפרמטר GET
@@ -443,42 +402,44 @@ def send_audio_via_ultramsg(to, audio_file_path, caption=""):
             'token': TOKEN
         }
         
-        # שלח את הקובץ עם פרמטרים אחרים ב-data
-        with open(audio_file_path, 'rb') as audio_file:
-            files = {'audio': audio_file}
-            data = {
-                'to': to,
-                'caption': caption
-            }
-            
-            print(f"🎵 שולח עם פרמטרים: to={to}, caption={caption}")
-            print(f"🎵 URL עם token: {url}?token={TOKEN[:5]}*****")
-            print(f"🎵 פרמטרים GET: {params}")
-            print(f"🎵 נתונים: {data}")
-            
-            response = requests.post(url, files=files, data=data, params=params)
-            print(f"🎵 תגובת UltraMsg API: {response.status_code}")
-            print(f"🎵 תוכן תגובה: {response.text}")
-            
-            # בדוק אם השליחה הצליחה
-            if response.status_code == 200:
-                try:
-                    response_json = response.json()
-                    if "error" in response_json:
-                        print(f"❌ שגיאת UltraMsg API: {response_json['error']}")
-                        return False
-                    else:
-                        print("✅ אודיו נשלח בהצלחה דרך UltraMsg")
-                        return True
-                except Exception as e:
-                    print(f"⚠️ לא הצלחתי לפרסר JSON: {e}")
-                    # אם התגובה היא 200 אבל לא JSON תקין, נניח שהשליחה הצליחה
-                    print("✅ אודיו נשלח בהצלחה (תגובה לא JSON)")
+        # שלח את ה-bytes ישירות עם BytesIO
+        from io import BytesIO
+        audio_file = BytesIO(audio_bytes)
+        audio_file.name = "audio.mp3"  # שם הקובץ לזיהוי סוג הקובץ
+        
+        files = {'audio': audio_file}
+        data = {
+            'to': to,
+            'caption': caption
+        }
+        
+        print(f"🎵 שולח עם פרמטרים: to={to}, caption={caption}")
+        print(f"🎵 URL עם token: {url}?token={TOKEN[:5]}*****")
+        print(f"🎵 גודל אודיו: {len(audio_bytes)} bytes")
+        
+        response = requests.post(url, files=files, data=data, params=params)
+        print(f"🎵 תגובת UltraMsg API: {response.status_code}")
+        print(f"🎵 תוכן תגובה: {response.text}")
+        
+        # בדוק אם השליחה הצליחה
+        if response.status_code == 200:
+            try:
+                response_json = response.json()
+                if "error" in response_json:
+                    print(f"❌ שגיאת UltraMsg API: {response_json['error']}")
+                    return False
+                else:
+                    print("✅ אודיו נשלח בהצלחה דרך UltraMsg")
                     return True
-            else:
-                print(f"❌ שגיאה בשליחת אודיו: {response.status_code}")
-                return False
-                
+            except Exception as e:
+                print(f"⚠️ לא הצלחתי לפרסר JSON: {e}")
+                # אם התגובה היא 200 אבל לא JSON תקין, נניח שהשליחה הצליחה
+                print("✅ אודיו נשלח בהצלחה (תגובה לא JSON)")
+                return True
+        else:
+            print(f"❌ שגיאה בשליחת אודיו: {response.status_code}")
+            return False
+            
     except Exception as e:
         print(f"❌ שגיאה בשליחת אודיו דרך UltraMsg: {e}")
         import traceback
@@ -685,8 +646,8 @@ def handle_voice_message(payload, sender):
         # 3. צור תגובה קולית עם OpenAI TTS קול nova
         print("🎵 יוצר תגובה קולית עם קול nova...")
         try:
-            audio_file_path = create_tts_audio_nova(reply)
-            if not audio_file_path:
+            audio_bytes = create_tts_audio_nova(reply)
+            if not audio_bytes:
                 print("❌ יצירת אודיו נכשלה, שולח טקסט...")
                 send_whatsapp_message(sender, reply)
                 return "OK", 200
@@ -698,7 +659,7 @@ def handle_voice_message(payload, sender):
         try:
             # 4. שלח את האודיו דרך UltraMsg
             print("📤 שולח אודיו דרך UltraMsg...")
-            audio_sent = send_audio_via_ultramsg(sender, audio_file_path, caption="תגובה קולית")
+            audio_sent = send_audio_via_ultramsg(sender, audio_bytes, caption="תגובה קולית")
             
             if audio_sent:
                 print("✅ אודיו נשלח בהצלחה!")
@@ -709,14 +670,6 @@ def handle_voice_message(payload, sender):
         except Exception as e:
             print(f"❌ שגיאה בשליחת אודיו: {e}, שולח טקסט...")
             send_whatsapp_message(sender, reply)
-        finally:
-            # 5. מחק את הקובץ הזמני
-            if audio_file_path and os.path.exists(audio_file_path):
-                try:
-                    os.unlink(audio_file_path)
-                    print(f"🗑️ קובץ זמני נמחק: {audio_file_path}")
-                except Exception as e:
-                    print(f"⚠️ לא הצלחתי למחוק קובץ זמני: {e}")
         
         return "OK", 200
         
@@ -815,7 +768,7 @@ def send_whatsapp_message(to, message):
     print("📤 הודעת טקסט נשלחה:", response.text)
 
 def send_whatsapp_audio(to, audio_data):
-    """שלח הודעה קולית"""
+    """שלח הודעה קולית - ללא קבצים זמניים"""
     try:
         # בדוק שהאודיו לא ריק
         if not audio_data or len(audio_data) < 1000:
@@ -824,52 +777,43 @@ def send_whatsapp_audio(to, audio_data):
         
         print(f"🎵 שולח הודעה קולית: {len(audio_data)} bytes")
         
-        # צור קובץ זמני לאודיו
-        temp_file_path = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-                temp_file.write(audio_data)
-                temp_file.flush()
-                temp_file_path = temp_file.name
-            
-            # שלח את קובץ האודיו עם token כפרמטר GET
-            url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/audio"
-            
-            # הוסף את הטוקן כפרמטר GET
-            params = {
-                'token': TOKEN
-            }
-            
-            with open(temp_file_path, 'rb') as audio_file:
-                files = {'audio': audio_file}
-                data = {
-                    'to': to
-                }
-                
-                response = requests.post(url, files=files, data=data, params=params)
-                print("🎵 תגובת API:", response.text)
-                
-                # בדוק אם השליחה הצליחה
-                if response.status_code == 200:
-                    # בדוק שהתגובה לא מכילה שגיאה
-                    try:
-                        response_json = response.json()
-                        if "error" in response_json:
-                            print(f"❌ שגיאת API: {response_json['error']}")
-                            return False
-                    except:
-                        pass
-                    
-                    print("✅ הודעה קולית נשלחה בהצלחה")
-                    return True
-                else:
-                    print(f"⚠️ שגיאה בשליחת הודעה קולית: {response.status_code}")
+        # שלח את האודיו ישירות עם BytesIO
+        from io import BytesIO
+        audio_file = BytesIO(audio_data)
+        audio_file.name = "audio.mp3"
+        
+        # שלח את קובץ האודיו עם token כפרמטר GET
+        url = f"https://api.ultramsg.com/{INSTANCE_ID}/messages/audio"
+        
+        # הוסף את הטוקן כפרמטר GET
+        params = {
+            'token': TOKEN
+        }
+        
+        files = {'audio': audio_file}
+        data = {
+            'to': to
+        }
+        
+        response = requests.post(url, files=files, data=data, params=params)
+        print("🎵 תגובת API:", response.text)
+        
+        # בדוק אם השליחה הצליחה
+        if response.status_code == 200:
+            # בדוק שהתגובה לא מכילה שגיאה
+            try:
+                response_json = response.json()
+                if "error" in response_json:
+                    print(f"❌ שגיאת API: {response_json['error']}")
                     return False
-                    
-        finally:
-            # מחק קובץ זמני בסוף
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
+            except:
+                pass
+            
+            print("✅ הודעה קולית נשלחה בהצלחה")
+            return True
+        else:
+            print(f"⚠️ שגיאה בשליחת הודעה קולית: {response.status_code}")
+            return False
             
     except Exception as e:
         print(f"❌ שגיאה בשליחת הודעה קולית: {e}")
