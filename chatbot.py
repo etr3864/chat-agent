@@ -93,7 +93,12 @@ def save_conversation_to_file(user_id: str):
         for msg in conversations[user_id]:
             role = msg["role"].upper()
             content = msg["content"]
-            f.write(f"{role}: {content}\n\n")
+            
+            # בדוק אם זו הודעת תמונה
+            if "[תמונה]" in content and "🔗 קישור לתמונה:" in content:
+                f.write(f"{role}: {content}\n\n")
+            else:
+                f.write(f"{role}: {content}\n\n")
 
 # סיכום שיחה קצר
 def summarize_conversation(user_id: str) -> str:

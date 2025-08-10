@@ -86,9 +86,26 @@ class ConversationSummaries:
             json.dump(self.summaries, f, ensure_ascii=False, indent=2)
     
     def add_summary(self, user_id: str, summary: str, conversations: dict, pushname: str = ""):
-        """הוסף סיכום חדש"""
+        """הוסף סיכום חדש עם מידע על תמונות"""
         customer_name = extract_customer_name(user_id, conversations, pushname)
         customer_gender = detect_customer_gender(user_id, conversations)
+        
+        # ספור תמונות בשיחה לפי תוכן ההודעות
+        image_count = 0
+        image_urls = []
+        for msg in conversations.get(user_id, []):
+            if "[תמונה]" in msg.get("content", ""):
+                image_count += 1
+                # חלץ קישור לתמונה מהתוכן
+                content = msg.get("content", "")
+                if "🔗 קישור לתמונה:" in content:
+                    lines = content.split('\n')
+                    for line in lines:
+                        if "🔗 קישור לתמונה:" in line:
+                            url = line.replace("🔗 קישור לתמונה:", "").strip()
+                            if url:
+                                image_urls.append(url)
+                            break
         
         summary_data = {
             "phone_number": user_id,
@@ -96,7 +113,9 @@ class ConversationSummaries:
             "gender": customer_gender,
             "summary": summary,
             "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z'),
-            "total_messages": len([m for m in conversations.get(user_id, []) if m["role"] in ["user", "assistant"]])
+            "total_messages": len([m for m in conversations.get(user_id, []) if m["role"] in ["user", "assistant"]]),
+            "image_count": image_count,
+            "image_urls": image_urls
         }
         
         # שמור ב-JSON (גיבוי)
@@ -107,7 +126,7 @@ class ConversationSummaries:
         if self.mongodb_available:
             mongodb_manager.save_summary(user_id, summary_data)
         
-        print(f"✅ סיכום נשמר עבור {customer_name} ({user_id})")
+        print(f"✅ סיכום נשמר עבור {customer_name} ({user_id}) עם {image_count} תמונות")
     
     def get_summary(self, user_id: str):
         """קבל סיכום לפי מזהה משתמש"""

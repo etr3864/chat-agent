@@ -1701,6 +1701,19 @@ def handle_image_message(payload, sender):
         
         print(f"🖼️ ניתוח תמונה: {image_analysis}")
         
+        # הוסף את התמונה למערכת השיחות עם מידע נוסף
+        from chatbot import conversations
+        if sender not in conversations:
+            conversations[sender] = [{"role": "system", "content": "system_prompt"}]
+        
+        # שמור את התמונה כחלק מהשיחה עם מידע נוסף
+        image_message = f"[תמונה] {image_analysis}"
+        if caption:
+            image_message += f"\nכיתוב: {caption}"
+        image_message += f"\n🔗 קישור לתמונה: {image_url}"
+        
+        conversations[sender].append({"role": "user", "content": image_message})
+        
         # הכן הודעה עם ניתוח התמונה
         message_to_process = f"[תמונה] {image_analysis}"
         if caption:
