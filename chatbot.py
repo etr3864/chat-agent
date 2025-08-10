@@ -103,29 +103,32 @@ def summarize_conversation(user_id: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": """אתה מומחה לניתוח שיחות מכירה. סכם את השיחה הזו בצורה מפורטת ומקצועית.
+            {"role": "system", "content": """אתה מומחה לניתוח שיחות מכירה של VALUE+. סכם את השיחה הזו בצורה מפורטת ומקצועית.
 
-📋 מה לסכם:
-1. **מידע על העסק**: מה הם עושים, איזה שירות/מוצר
-2. **צרכים ורצונות**: מה הלקוח רוצה להשיג
-3. **בעיות וחששות**: מה מפריע לו או מה הוא חושש ממנו
-4. **מידע טכני**: לוגו, תמונות, עיצוב, סגנון
-5. **פרופיל לקוח**: גיל, מגדר, תחומי עניין
-6. **מוכנות לרכישה**: עד כמה הוא מוכן לקנות עכשיו
+📋 מה לסכם (חובה לבדוק את כולם):
+1. **שם העסק/המוצר** - מה בדיוק הם עושים?
+2. **מטרת הדף** - מה הם רוצים שהלקוחות שלהם יעשו? (מכירה/השארת פרטים/תיאום)
+3. **פרטי קשר** - איך לפנות אליהם?
+4. **חומרים קיימים** - יש לוגו/תמונות?
+5. **סגנון עיצוב** - מודרני, קלאסי, צבעוני?
+6. **יתרון תחרותי** - מה מבדל אותם מאחרים?
+7. **רגש בדף** - איך הלקוח שלהם צריך להרגיש?
+8. **פרופיל לקוחות** - גיל, מגדר, תחומי עניין?
 
 🎯 הנחיות ליועץ:
 - איך לגשת ללקוח (פסיכולוגית)
 - מה הדגשים החשובים
 - איזה סוג לקוח זה (חם/חם-חם/קר)
-- מה המחיר שהם צריכים להציע
+- מה המחיר שהם צריכים להציע (800 שקל)
 - איך להתגבר על התנגדויות
 
 📊 סיכום קצר:
 - סטטוס: [חם/חם-חם/קר]
 - סיכוי מכירה: [גבוה/בינוני/נמוך]
 - זמן צפוי לסגירה: [מיד/שבוע/חודש]
-- מחיר מומלץ: [800/1000/1200]
+- מחיר מומלץ: [800 שקל]
 
+⚠️ חשוב: אם חסר מידע על אחד מהנושאים, ציין זאת בבירור.
 השתמש בעברית ברורה ומקצועית."""},
             {"role": "user", "content": text}
         ]
@@ -213,7 +216,7 @@ def is_conversation_timed_out(user_id: str) -> bool:
         return False
     
     time_diff = datetime.now() - last_message_times[user_id]
-    return time_diff.total_seconds() > 120  # 2 דקות = 120 שניות
+    return time_diff.total_seconds() > 3600  # שעה = 3600 שניות
 
 # עדכון זמן הודעה אחרונה
 def update_last_message_time(user_id: str):

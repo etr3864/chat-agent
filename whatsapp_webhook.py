@@ -60,6 +60,85 @@ def handle_admin_commands(message, sender):
 
 כשהבוט לא פעיל, אתה יכול לשלוח הודעות ידניות ללא הפרעה."""
     
+    # פקודות מנהל מתקדמות (רק למנהל הראשי)
+    if sender == "972523006544" or sender == "0523006544":
+        # צפייה בסיכומים
+        if message_lower in ["סיכומים", "summaries"]:
+            try:
+                from conversation_summaries import summaries_manager
+                summaries = summaries_manager.get_all_summaries()
+                if summaries:
+                    summary_text = "📋 סיכומי שיחות:\n\n"
+                    for i, summary in enumerate(summaries[:10], 1):  # רק 10 הראשונים
+                        summary_text += f"{i}. {summary.get('customer_name', 'לא ידוע')} - {summary.get('phone_number', '')}\n"
+                        summary_text += f"   {summary.get('summary', '')[:100]}...\n\n"
+                    if len(summaries) > 10:
+                        summary_text += f"...ועוד {len(summaries) - 10} סיכומים"
+                    return summary_text
+                else:
+                    return "📋 אין סיכומים זמינים כרגע"
+            except Exception as e:
+                return f"❌ שגיאה בטעינת סיכומים: {e}"
+        
+        # חיפוש שיחה
+        elif message_lower.startswith("חפש "):
+            search_term = message_lower[5:].strip()
+            try:
+                from conversation_summaries import summaries_manager
+                results = summaries_manager.search_summaries(search_term)
+                if results:
+                    result_text = f"🔍 תוצאות חיפוש עבור '{search_term}':\n\n"
+                    for i, result in enumerate(results[:5], 1):
+                        result_text += f"{i}. {result.get('customer_name', 'לא ידוע')} - {result.get('phone_number', '')}\n"
+                        result_text += f"   {result.get('summary', '')[:100]}...\n\n"
+                    return result_text
+                else:
+                    return f"🔍 לא נמצאו תוצאות עבור '{search_term}'"
+            except Exception as e:
+                return f"❌ שגיאה בחיפוש: {e}"
+        
+        # סטטיסטיקות
+        elif message_lower in ["סטטיסטיקות", "stats", "statistics"]:
+            try:
+                from conversation_summaries import summaries_manager
+                stats = summaries_manager.get_statistics()
+                return f"📊 סטטיסטיקות:\n\n{stats}"
+            except Exception as e:
+                return f"❌ שגיאה בטעינת סטטיסטיקות: {e}"
+        
+        # ייצוא נתונים
+        elif message_lower in ["ייצא", "export"]:
+            try:
+                from conversation_summaries import summaries_manager
+                filename = summaries_manager.export_to_txt()
+                return f"📤 נתונים יוצאו לקובץ: {filename}"
+            except Exception as e:
+                return f"❌ שגיאה בייצוא: {e}"
+        
+        # בדיקת בוט
+        elif message_lower.startswith("בדוק בוט "):
+            phone = message_lower[10:].strip()
+            if not phone.startswith("972"):
+                phone = "972" + phone.lstrip("0")
+            status = "פעיל" if is_bot_active(phone) else "לא פעיל"
+            return f"🤖 מצב הבוט עבור {phone}: {status}"
+        
+        # עצירת בוט
+        elif message_lower.startswith("עצור בוט "):
+            phone = message_lower[10:].strip()
+            if not phone.startswith("972"):
+                phone = "972" + phone.lstrip("0")
+            set_bot_status(phone, False)
+            return f"🛑 הבוט הופסק עבור {phone}"
+        
+        # הפעלת בוט
+        elif message_lower.startswith("הפעל בוט "):
+            phone = message_lower[10:].strip()
+            if not phone.startswith("972"):
+                phone = "972" + phone.lstrip("0")
+            set_bot_status(phone, True)
+            return f"✅ הבוט הופעל עבור {phone}"
+    
     return None  # לא זוהו פקודות מנהל
 
 # טען משתני סביבה - ללא ברירת מחדל כדי לזהות בעיות
@@ -522,6 +601,30 @@ def whatsapp_webhook():
             send_whatsapp_message(sender, admin_reply)
             return "OK", 200
         
+        # טיפול מיוחד למנהל - מספר 0523006544
+        if sender == "972523006544" or sender == "0523006544":
+            print(f"👑 מנהל זוהה: {sender}")
+            admin_menu = """👑 שלום מנהל! ברוך הבא לתפריט הניהול
+
+📊 מה תרצה לעשות?
+
+1️⃣ **צפייה בסיכומים** - שלח "סיכומים"
+2️⃣ **חיפוש שיחה** - שלח "חפש [שם/מספר]"
+3️⃣ **סטטיסטיקות** - שלח "סטטיסטיקות"
+4️⃣ **ייצוא נתונים** - שלח "ייצא"
+5️⃣ **בדיקת בוט** - שלח "בדוק בוט [מספר]"
+6️⃣ **עצירת בוט** - שלח "עצור בוט [מספר]"
+7️⃣ **הפעלת בוט** - שלח "הפעל בוט [מספר]"
+
+💡 דוגמאות:
+- "חפש יוסי"
+- "בדוק בוט 972123456789"
+- "עצור בוט 972123456789"
+
+איזה פעולה תרצה לבצע?"""
+            send_whatsapp_message(sender, admin_menu)
+            return "OK", 200
+        
         # בדוק אם הבוט פעיל למשתמש זה
         if not is_bot_active(sender):
             print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה")
@@ -581,9 +684,14 @@ def handle_voice_message(payload, sender):
         
         # 3. צור תגובה קולית עם OpenAI TTS קול nova
         print("🎵 יוצר תגובה קולית עם קול nova...")
-        audio_file_path = create_tts_audio_nova(reply)
-        if not audio_file_path:
-            print("❌ יצירת אודיו נכשלה, שולח טקסט...")
+        try:
+            audio_file_path = create_tts_audio_nova(reply)
+            if not audio_file_path:
+                print("❌ יצירת אודיו נכשלה, שולח טקסט...")
+                send_whatsapp_message(sender, reply)
+                return "OK", 200
+        except Exception as e:
+            print(f"❌ שגיאה ביצירת אודיו: {e}, שולח טקסט...")
             send_whatsapp_message(sender, reply)
             return "OK", 200
         
@@ -598,6 +706,9 @@ def handle_voice_message(payload, sender):
                 print("⚠️ שליחת אודיו נכשלה, שולח טקסט...")
                 send_whatsapp_message(sender, reply)
                 
+        except Exception as e:
+            print(f"❌ שגיאה בשליחת אודיו: {e}, שולח טקסט...")
+            send_whatsapp_message(sender, reply)
         finally:
             # 5. מחק את הקובץ הזמני
             if audio_file_path and os.path.exists(audio_file_path):
