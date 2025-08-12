@@ -16,6 +16,8 @@ import os
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
+import threading
+import schedule
 
 # OpenAI TTS מודל מתקדם
 # gpt-4o-mini-tts הוא המודל העדכני ביותר להמרת טקסט לדיבור
@@ -52,6 +54,9 @@ else:
 # מילון לשמירת מצב הבוט לכל משתמש
 bot_active_status = {}
 
+# מילון לשמירת זמני הודעות אחרונות לכל משתמש
+last_message_times = {}
+
 def is_bot_active(user_id):
     """בדוק אם הבוט פעיל למשתמש מסוים"""
     return bot_active_status.get(user_id, True)  # ברירת מחדל: פעיל
@@ -60,6 +65,121 @@ def set_bot_status(user_id, active):
     """הגדר מצב הבוט למשתמש מסוים"""
     bot_active_status[user_id] = active
     print(f"🤖 בוט {'פעיל' if active else 'לא פעיל'} עבור משתמש: {user_id}")
+
+def update_last_message_time(user_id):
+    """עדכן זמן הודעה אחרונה למשתמש"""
+    last_message_times[user_id] = datetime.now()
+    print(f"⏰ זמן הודעה אחרונה עודכן עבור: {user_id}")
+
+def check_and_summarize_old_conversations():
+    """בדוק שיחות ישנות שלא קיבלו סיכום ובצע סיכום אוטומטי"""
+    try:
+        print("🔄 בודק שיחות ישנות לסיכום אוטומטי...")
+        
+        # ייבא את הפונקציות הנדרשות
+        from chatbot import conversations, summarize_conversation, save_conversation_summary, save_conversation_to_file
+        
+        current_time = datetime.now()
+        summarized_count = 0
+        
+        # בדוק אם יש שיחות
+        if not conversations:
+            print("ℹ️ אין שיחות לבדיקה")
+            return
+        
+        for user_id, conversation in conversations.items():
+            try:
+                # בדוק אם יש שיחה עם יותר מ-5 הודעות (הורדתי מ-10 ל-5)
+                user_assistant_messages = [m for m in conversation if m["role"] in ["user", "assistant"]]
+                if len(user_assistant_messages) >= 5:
+                    # בדוק אם עבר זמן רב מההודעה האחרונה (יותר משעה)
+                    if user_id in last_message_times:
+                        time_diff = current_time - last_message_times[user_id]
+                        if time_diff.total_seconds() > 3600:  # שעה
+                            # בדוק אם כבר יש סיכום בקובץ ה-JSON
+                            try:
+                                from conversation_summaries import summaries_manager
+                                existing_summary = summaries_manager.get_summary(user_id)
+                                if not existing_summary:
+                                    print(f"🔄 מבצע סיכום אוטומטי לשיחה ישנה: {user_id}")
+                                    summary = summarize_conversation(user_id)
+                                    save_conversation_summary(user_id, summary)
+                                    save_conversation_to_file(user_id)
+                                    summarized_count += 1
+                                    print(f"✅ סיכום אוטומטי הושלם עבור: {user_id}")
+                            except Exception as e:
+                                print(f"⚠️ שגיאה בסיכום אוטומטי עבור {user_id}: {e}")
+                                continue
+            except Exception as e:
+                print(f"⚠️ שגיאה בבדיקת שיחה {user_id}: {e}")
+                continue
+        
+        if summarized_count > 0:
+            print(f"✅ סיכום אוטומטי הושלם עבור {summarized_count} שיחות")
+        else:
+            print("ℹ️ אין שיחות ישנות שדורשות סיכום")
+            
+    except Exception as e:
+        print(f"❌ שגיאה בבדיקת שיחות ישנות: {e}")
+        import traceback
+        traceback.print_exc()
+
+def run_auto_summary_scheduler():
+    """הפעל את מערכת הסיכום האוטומטי"""
+    try:
+        print("⏰ מפעיל מערכת סיכום אוטומטי...")
+        
+        # בדוק שיחות ישנות כל 30 דקות
+        schedule.every(30).minutes.do(check_and_summarize_old_conversations)
+        
+        # בדוק שיחות ישנות כל שעה
+        schedule.every().hour.do(check_and_summarize_old_conversations)
+        
+        print("✅ מערכת סיכום אוטומטי הופעלה")
+        print("   - בדיקה כל 30 דקות")
+        print("   - בדיקה כל שעה")
+        
+        # הרץ בדיקה מיד בהפעלה
+        check_and_summarize_old_conversations()
+        
+        while True:
+            try:
+                schedule.run_pending()
+                time.sleep(60)  # בדוק כל דקה
+            except KeyboardInterrupt:
+                print("⏹️ מערכת הסיכום האוטומטי הופסקה")
+                break
+            except Exception as e:
+                print(f"⚠️ שגיאה במערכת הסיכום האוטומטי: {e}")
+                time.sleep(60)  # המתן דקה ונסה שוב
+                continue
+            
+    except Exception as e:
+        print(f"❌ שגיאה במערכת הסיכום האוטומטי: {e}")
+        import traceback
+        traceback.print_exc()
+
+def start_auto_summary_thread():
+    """הפעל את מערכת הסיכום האוטומטי בthread נפרד"""
+    try:
+        print("🚀 מפעיל מערכת סיכום אוטומטי...")
+        scheduler_thread = threading.Thread(target=run_auto_summary_scheduler, daemon=True)
+        scheduler_thread.start()
+        print("✅ thread של מערכת הסיכום האוטומטי הופעל")
+        
+        # המתן קצת כדי לוודא שהמערכת עובדת
+        time.sleep(1)
+        
+        # בדוק אם ה-thread עדיין פעיל
+        if scheduler_thread.is_alive():
+            print("✅ מערכת הסיכום האוטומטי פועלת בהצלחה")
+        else:
+            print("⚠️ מערכת הסיכום האוטומטי לא פועלת")
+            
+    except Exception as e:
+        print(f"❌ שגיאה בהפעלת thread של מערכת הסיכום: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_admin_commands(message, sender):
     """טיפול בפקודות מנהל לשליטה בבוט"""
@@ -195,48 +315,6 @@ def handle_admin_commands(message, sender):
             except Exception as e:
                 return f"❌ שגיאה בבדיקת בריאות המערכת: {e}"
         
-        # בדיקת מערכת הסיכום האוטומטי
-        elif message_lower in ["בדוק סיכום", "summary status", "מערכת סיכום"]:
-            try:
-                from auto_summarizer import get_auto_summarizer_status
-                status = get_auto_summarizer_status()
-                status_text = "📝 סטטוס מערכת הסיכום האוטומטי:\n\n"
-                status_text += f"🔄 פעילה: {'כן' if status['running'] else 'לא'}\n"
-                status_text += f"⏱️ מרווח בדיקה: {status['check_interval']} שניות\n"
-                status_text += f"📊 סה\"כ שיחות: {status['total_conversations']}\n"
-                status_text += f"✅ שיחות מסוכמות: {status['summarized_conversations']}\n"
-                status_text += f"🔄 שיחות פעילות: {status['active_conversations']}\n"
-                return status_text
-            except Exception as e:
-                return f"❌ שגיאה בבדיקת מערכת הסיכום: {e}"
-        
-        # הפעלת מערכת הסיכום האוטומטי
-        elif message_lower in ["הפעל סיכום", "start summary", "הפעל מערכת סיכום"]:
-            try:
-                from auto_summarizer import start_auto_summarizer
-                start_auto_summarizer()
-                return "✅ מערכת הסיכום האוטומטי הופעלה"
-            except Exception as e:
-                return f"❌ שגיאה בהפעלת מערכת הסיכום: {e}"
-        
-        # עצירת מערכת הסיכום האוטומטי
-        elif message_lower in ["עצור סיכום", "stop summary", "עצור מערכת סיכום"]:
-            try:
-                from auto_summarizer import stop_auto_summarizer
-                stop_auto_summarizer()
-                return "🛑 מערכת הסיכום האוטומטי הופסקה"
-            except Exception as e:
-                return f"❌ שגיאה בעצירת מערכת הסיכום: {e}"
-        
-        # סיכום כפוי לכל השיחות הישנות
-        elif message_lower in ["סכם הכל", "summarize all", "סיכום כפוי"]:
-            try:
-                from auto_summarizer import force_summarize_all
-                force_summarize_all()
-                return "🔄 סיכום כפוי לכל השיחות הישנות הושלם"
-            except Exception as e:
-                return f"❌ שגיאה בסיכום כפוי: {e}"
-        
         # סטטיסטיקות מערכת קולית
         elif message_lower in ["סטט קול", "voice stats", "voice statistics", "סטטיסטיקות קול"]:
             try:
@@ -328,24 +406,26 @@ try:
     INSTANCE_ID = os.environ["ULTRA_INSTANCE_ID"]
     TOKEN = os.environ["ULTRA_TOKEN"]
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-    ELEVEN_API_KEY = os.environ["ELEVEN_API_KEY"]
     
     print("✅ INSTANCE_ID:", INSTANCE_ID)
     print("✅ TOKEN prefix:", TOKEN[:5] + "*****")
     print("✅ OPENAI_API_KEY prefix:", OPENAI_API_KEY[:10] + "*****")
-    print("✅ ELEVEN_API_KEY prefix:", ELEVEN_API_KEY[:5] + "*****")
     
 except KeyError as e:
     print(f"❌ שגיאה: משתנה סביבה חסר: {e}")
     raise
 
-# הפעל את מערכת הסיכום האוטומטי
+# מפתח ElevenLabs ל-TTS
 try:
-    from auto_summarizer import start_auto_summarizer
-    start_auto_summarizer()
-    print("✅ מערכת הסיכום האוטומטי הופעלה")
-except Exception as e:
-    print(f"⚠️ לא הצלחתי להפעיל את מערכת הסיכום האוטומטי: {e}")
+    ELEVEN_API_KEY = os.environ["ELEVEN_API_KEY"]
+    print("✅ ELEVEN_API_KEY prefix:", ELEVEN_API_KEY[:10] + "*****")
+except KeyError as e:
+    print(f"❌ שגיאה: משתנה סביבה חסר: {e}")
+    raise
+
+# הגדרות קבועות ל-ElevenLabs TTS
+ELEVEN_VOICE_ID = "cgSgspJ2msm6clMCkdW9"  # Jessica
+ELEVEN_MODEL_ID = "eleven_multilingual_v3"
 
 # התחברות ל־OpenAI עבור תמלול ו-TTS
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -506,28 +586,29 @@ def transcribe_audio(audio_data):
         return None
 
 def text_to_speech(text, language="he"):
-    """המר טקסט לדיבור באמצעות ElevenLabs TTS - מחזיר bytes של MP3"""
+    """המר טקסט לדיבור באמצעות ElevenLabs TTS (MP3 bytes)"""
     try:
+        # בדוק שהטקסט לא ריק
         if not text or not text.strip():
             print("⚠️ טקסט ריק ל-TTS")
             return None
 
-        # שמירה על אותו כלל קיצור כמו קודם
+        # הגבל אורך הטקסט לשמירה על זמן תגובה וגודל קובץ
         if len(text) > 4000:
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {len(text)} תווים")
 
-        print(f"🎵 [ElevenLabs] יוצר קול עבור: {text[:100]}...")
+        print(f"🎵 יוצר קול עבור: {text[:100]}... (ElevenLabs)")
 
-        url = "https://api.elevenlabs.io/v1/text-to-speech/cgSgspJ2msm6clMCkdW9"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
         headers = {
             "Accept": "audio/mpeg",
             "Content-Type": "application/json",
             "xi-api-key": ELEVEN_API_KEY,
         }
-        payload = {
+        body = {
             "text": text,
-            "model_id": "eleven_multilingual_v3",
+            "model_id": ELEVEN_MODEL_ID,
             "voice_settings": {
                 "stability": 0.4,
                 "similarity_boost": 0.8,
@@ -536,21 +617,17 @@ def text_to_speech(text, language="he"):
             },
         }
 
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        resp = requests.post(url, headers=headers, data=json.dumps(body))
         if resp.status_code != 200:
-            print(f"❌ שגיאה מ-ElevenLabs: {resp.status_code} - {resp.text[:200]}")
+            print(f"❌ שגיאה מ-ElevenLabs TTS: {resp.status_code} {resp.text}")
             return None
 
         audio_bytes = resp.content
-        if not audio_bytes or len(audio_bytes) < 1000:
-            print("⚠️ קובץ אודיו ריק או קטן מדי מ-ElevenLabs")
-            return None
-
-        print(f"✅ קול נוצר בהצלחה מ-ElevenLabs: {len(audio_bytes)} bytes")
+        print(f"✅ קול נוצר בהצלחה: {len(audio_bytes)} bytes")
         return audio_bytes
 
     except Exception as e:
-        print(f"❌ שגיאה ב-TTS (ElevenLabs): {e}")
+        print(f"❌ שגיאה ב-TTS: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -669,31 +746,33 @@ def transcribe_voice_message(file_url):
         return None
 
 def create_tts_audio_shimmer(text, voice="shimmer"):
-    """צור אודיו באמצעות ElevenLabs TTS - מחזיר bytes במקום נתיב לקובץ"""
+    """צור אודיו באמצעות ElevenLabs TTS (Jessica) - מחזיר bytes של MP3"""
     try:
-        print("🎵 מתחיל יצירת אודיו עם ElevenLabs (Jessica)...")
+        print(f"🎵 מתחיל יצירת אודיו עם ElevenLabs (Jessica)...")
 
+        # בדוק שהטקסט לא ריק
         if not text or not text.strip():
             print("⚠️ טקסט ריק ל-TTS")
             return None
 
+        # הגבל אורך הטקסט
         original_length = len(text)
         if original_length > 4000:
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(text)} תווים")
 
-        print(f"🎵 יוצר קול (ElevenLabs) עבור: {text[:100]}...")
+        print(f"🎵 יוצר קול עבור: {text[:100]}... (ElevenLabs)")
         print(f"📊 אורך הטקסט הסופי: {len(text)} תווים")
 
-        url = "https://api.elevenlabs.io/v1/text-to-speech/cgSgspJ2msm6clMCkdW9"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
         headers = {
             "Accept": "audio/mpeg",
             "Content-Type": "application/json",
             "xi-api-key": ELEVEN_API_KEY,
         }
-        payload = {
+        body = {
             "text": text,
-            "model_id": "eleven_multilingual_v3",
+            "model_id": ELEVEN_MODEL_ID,
             "voice_settings": {
                 "stability": 0.4,
                 "similarity_boost": 0.8,
@@ -702,9 +781,9 @@ def create_tts_audio_shimmer(text, voice="shimmer"):
             },
         }
 
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        resp = requests.post(url, headers=headers, data=json.dumps(body))
         if resp.status_code != 200:
-            print(f"❌ שגיאה מ-ElevenLabs: {resp.status_code} - {resp.text[:200]}")
+            print(f"❌ שגיאה מ-ElevenLabs TTS: {resp.status_code} {resp.text}")
             return None
 
         audio_bytes = resp.content
@@ -716,21 +795,26 @@ def create_tts_audio_shimmer(text, voice="shimmer"):
         print(f"✅ קול נוצר בהצלחה: {len(audio_bytes)} bytes")
         print(f"📊 גודל קובץ MP3: {len(audio_bytes)} bytes")
 
+        # בדיקה נוספת - וודא שהאודיו לא ריק
         if len(audio_bytes) < 1000:
             print(f"⚠️ קובץ אודיו קטן מדי: {len(audio_bytes)} bytes")
             return None
 
+        # בדיקה - וודא שהאודיו לא גדול מדי (WhatsApp מגביל ל-16MB)
         if len(audio_bytes) > 16 * 1024 * 1024:
             print(f"⚠️ קובץ אודיו גדול מדי: {len(audio_bytes)} bytes (מעל 16MB)")
+            # נסה לקצר את הטקסט
             shortened_text = text[:2000] + "..."
             print(f"🔄 מנסה עם טקסט מקוצר: {len(shortened_text)} תווים")
             return create_tts_audio_shimmer(shortened_text)
 
         print(f"🎵 קובץ MP3 מוכן לשליחה: {len(audio_bytes)} bytes")
+
+        # מחזיר את ה-bytes ישירות - ללא שמירת קובץ זמני
         return audio_bytes
 
     except Exception as e:
-        print(f"❌ שגיאה ב-TTS (ElevenLabs): {e}")
+        print(f"❌ שגיאה ב-TTS: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -1514,6 +1598,9 @@ def whatsapp_webhook():
                 
         print(f"📩 הודעת טקסט מ-{sender}: {message}")
         
+        # עדכן זמן הודעה אחרונה
+        update_last_message_time(sender)
+        
         # בדוק אם זו פקודת מנהל
         admin_reply = handle_admin_commands(message, sender)
         if admin_reply:
@@ -1540,17 +1627,10 @@ def whatsapp_webhook():
 6️⃣ **עצירת בוט** - שלח "עצור בוט [מספר]"
 7️⃣ **הפעלת בוט** - שלח "הפעל בוט [מספר]"
 
-🔧 **מערכת הסיכום האוטומטי:**
-8️⃣ **בדיקת מערכת סיכום** - שלח "בדוק סיכום"
-9️⃣ **הפעלת מערכת סיכום** - שלח "הפעל סיכום"
-🔟 **עצירת מערכת סיכום** - שלח "עצור סיכום"
-1️⃣1️⃣ **סיכום כפוי לכל השיחות** - שלח "סכם הכל"
-
 💡 דוגמאות:
 - "חפש יוסי"
 - "בדוק בוט 972123456789"
 - "עצור בוט 972123456789"
-- "בדוק סיכום"
 
 איזה פעולה תרצה לבצע?"""
             send_whatsapp_message(sender, admin_menu)
@@ -1561,21 +1641,18 @@ def whatsapp_webhook():
             print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה")
             return "OK", 200  # לא שולח תשובה, אבל מקבל את ההודעה
         
-        # הבוט פעיל - איסוף הודעות ודיבאונס כדי לשלוח תשובה אחת
-        print(f"🤖 אוסף הודעה למאגר וממתין לשקט...")
-        from chatbot import add_message_to_buffer, wait_for_buffer_and_get_reply, BUFFER_TIMEOUT
-
-        # הוסף למאגר והמתן לשקט של BUFFER_TIMEOUT
-        add_message_to_buffer(sender, message)
-        final_reply = wait_for_buffer_and_get_reply(sender, timeout=max(3.0, BUFFER_TIMEOUT + 0.5))
-
-        if final_reply:
-            print(f"💬 תשובה סופית מאוחדת: {final_reply}")
-            # עיכוב חכם לפני שליחה
-            delay = calculate_smart_delay(len(final_reply), "text")
-            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה...")
-            time.sleep(delay)
-            send_whatsapp_message(sender, final_reply)
+        # הבוט פעיל - עבד את ההודעה
+        print(f"🤖 מעבד הודעה עם GPT...")
+        reply = chat_with_gpt(message, user_id=sender)
+        print(f"💬 תשובת GPT: {reply}")
+        
+        # חישוב עיכוב חכם לפי אורך ההודעה
+        delay = calculate_smart_delay(len(message), "text")
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה...")
+        time.sleep(delay)
+        
+        # שלח תשובת טקסט רגילה
+        send_whatsapp_message(sender, reply)
         
         return "OK", 200
 
@@ -1618,22 +1695,22 @@ def handle_voice_message(payload, sender):
         
         print(f"✅ תמלול הושלם: {transcribed_text}")
         
+        # עדכן זמן הודעה אחרונה
+        update_last_message_time(sender)
+        
         # 2. בדוק אם הבוט פעיל למשתמש זה
         if not is_bot_active(sender):
             print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה קולית")
             send_whatsapp_message(sender, "הבוט לא פעיל כרגע. שלח 'מעכשיו ההתכתבות שלך תמשיך עם הבוט' כדי להפעיל אותו.")
             return "OK", 200
         
-        # 3. איסוף הודעות ודיבאונס כדי לשלוח תשובה אחת (קולי או טקסט)
-        print("🤖 אוסף הודעה קולית למאגר וממתין לשקט...")
-        from chatbot import add_message_to_buffer, wait_for_buffer_and_get_reply, BUFFER_TIMEOUT
-        add_message_to_buffer(sender, transcribed_text)
-        reply = wait_for_buffer_and_get_reply(sender, timeout=max(3.0, BUFFER_TIMEOUT + 0.5))
-        if not reply:
-            reply = transcribed_text  # fallback נדיר, אך לא נשלח מיידית טקסט ביניים
+        # 3. עבד את הטקסט המתומלל עם GPT
+        print("🤖 מעבד עם GPT...")
+        reply = chat_with_gpt(transcribed_text, user_id=sender)
+        print(f"💬 תשובת GPT: {reply}")
         
         # חישוב עיכוב חכם לפי אורך ההודעה הקולית
-        delay = calculate_smart_delay(len(reply), "audio")
+        delay = calculate_smart_delay(len(transcribed_text), "audio")
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
@@ -1648,7 +1725,7 @@ def handle_voice_message(payload, sender):
             traceback.print_exc()
         
         if not audio_bytes:
-            print("❌ יצירת אודיו נכשלה, שולח טקסט במקום...")
+            print("❌ יצירת אודיו נכשלה, שולח טקסט...")
             # חישוב עיכוב חכם לפני שליחת טקסט
             delay = calculate_smart_delay(len(reply), "text")
             print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
@@ -1800,18 +1877,20 @@ def handle_image_message(payload, sender):
         
         print(f"📝 הודעה לעיבוד: {message_to_process}")
         
-        # עבד את ההודעה
-        from chatbot import get_buffered_reply, is_buffer_empty
+        # עדכן זמן הודעה אחרונה
+        update_last_message_time(sender)
         
-        # שימוש באיסוף הודעות ודיבאונס כדי לשלוח רק תשובה אחת
-        from chatbot import add_message_to_buffer, wait_for_buffer_and_get_reply, BUFFER_TIMEOUT
-        add_message_to_buffer(sender, message_to_process)
-        reply = wait_for_buffer_and_get_reply(sender, timeout=max(3.0, BUFFER_TIMEOUT + 0.5))
-        if reply:
-            delay = calculate_smart_delay(len(reply), "image")
-            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה לתמונה...")
-            time.sleep(delay)
-            send_whatsapp_message(sender, reply)
+        # עבד את ההודעה
+        reply = chat_with_gpt(message_to_process, user_id=sender)
+        print(f"💬 תשובת GPT: {reply}")
+        
+        # חישוב עיכוב חכם לפי אורך ההודעה וסוג התמונה
+        delay = calculate_smart_delay(len(message_to_process), "image")
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה לתמונה...")
+        time.sleep(delay)
+        
+        # שלח תשובת טקסט רגילה
+        send_whatsapp_message(sender, reply)
         
         return "OK", 200
         
@@ -2417,6 +2496,9 @@ if __name__ == '__main__':
     test_ultramsg_audio_format()
     test_ultramsg_api_format()
     test_ultramsg_api_parameters()
+    
+    # הפעל את מערכת הסיכום האוטומטי
+    start_auto_summary_thread()
     
     port = int(os.environ.get("PORT", 5000))
     print(f"🚀 מפעיל שרת על פורט {port}")
