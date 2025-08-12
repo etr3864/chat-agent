@@ -1577,7 +1577,8 @@ def whatsapp_webhook():
                 print("🎤 זוהתה הודעה קולית לפי סיומת קובץ")
         
         # בדיקה נוספת - אם יש טקסט רגיל, זה לא הודעה קולית
-        if payload.get("body") and not payload.get("body").startswith("http"):
+        # אל תדרוס זיהוי אודיו שכבר נקבע (למשל לפי type/media)
+        if (not is_audio) and payload.get("body") and not payload.get("body").startswith("http"):
             print("📝 זוהתה הודעת טקסט רגילה")
             is_audio = False
         
