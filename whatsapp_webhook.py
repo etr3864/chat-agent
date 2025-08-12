@@ -608,7 +608,6 @@ def text_to_speech(text, language="he"):
         }
         body = {
             "text": text,
-            "model_id": ELEVEN_MODEL_ID,
             "voice_settings": {
                 "stability": 0.4,
                 "similarity_boost": 0.8,
@@ -772,7 +771,6 @@ def create_tts_audio_shimmer(text, voice="shimmer"):
         }
         body = {
             "text": text,
-            "model_id": ELEVEN_MODEL_ID,
             "voice_settings": {
                 "stability": 0.4,
                 "similarity_boost": 0.8,
@@ -1397,39 +1395,32 @@ def send_audio_via_ultramsg_final(to, audio_bytes, caption=""):
         return False
 
 def calculate_smart_delay(message_length: int, message_type: str = "text") -> float:
-    """חישוב עיכוב חכם לפי אורך ההודעה וסוג ההודעה"""
-    base_delay = 1.0  # עיכוב בסיסי של שנייה
-    
+    """חישוב עיכוב חכם אך מקוצר מעט כדי לשפר מהירות תגובה"""
+    base_delay = 0.6  # היה 1.0
+
     if message_type == "image":
-        # תמונות דורשות יותר זמן לעיבוד
-        base_delay = 2.0
+        base_delay = 1.2  # היה 2.0
     elif message_type == "audio":
-        # הודעות קוליות דורשות יותר זמן לתמלול
-        base_delay = 3.0
-    
-    # עיכוב לפי אורך ההודעה
+        base_delay = 2.0  # היה 3.0
+
+    # עיכוב לפי אורך ההודעה (מקוצר בכ~35%)
     if message_length < 10:
-        # הודעות קצרות מאוד - עיכוב מינימלי
-        delay = base_delay + random.uniform(0.5, 1.5)
+        delay = base_delay + random.uniform(0.3, 0.9)
     elif message_length < 50:
-        # הודעות קצרות
-        delay = base_delay + random.uniform(1.0, 2.5)
+        delay = base_delay + random.uniform(0.6, 1.5)
     elif message_length < 150:
-        # הודעות בינוניות
-        delay = base_delay + random.uniform(2.0, 4.0)
+        delay = base_delay + random.uniform(1.2, 2.4)
     elif message_length < 300:
-        # הודעות ארוכות
-        delay = base_delay + random.uniform(3.0, 6.0)
+        delay = base_delay + random.uniform(1.8, 3.6)
     else:
-        # הודעות מאוד ארוכות
-        delay = base_delay + random.uniform(4.0, 8.0)
-    
-    # הוסף רנדומיות קטנה כדי שהבוט יראה יותר אנושי
-    delay += random.uniform(-0.5, 0.5)
-    
-    # וודא שהעיכוב לא שלילי
-    delay = max(0.5, delay)
-    
+        delay = base_delay + random.uniform(2.4, 4.8)
+
+    # רנדומיות קטנה
+    delay += random.uniform(-0.3, 0.3)
+
+    # רף מינימלי מעט נמוך יותר
+    delay = max(0.3, delay)
+
     print(f"⏱️ עיכוב חכם: {delay:.2f} שניות (אורך: {message_length}, סוג: {message_type})")
     return delay
 
