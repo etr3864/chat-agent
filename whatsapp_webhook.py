@@ -745,9 +745,9 @@ def transcribe_voice_message(file_url):
         return None
 
 def create_tts_audio_shimmer(text, voice="shimmer"):
-    """צור אודיו באמצעות ElevenLabs TTS (Jessica) - מחזיר bytes של MP3"""
+    """צור אודיו באמצעות OpenAI gpt-4o-mini-tts (voice=alloy) - מחזיר bytes של MP3"""
     try:
-        print(f"🎵 מתחיל יצירת אודיו עם ElevenLabs (Jessica)...")
+        print("🎵 מתחיל יצירת אודיו עם OpenAI gpt-4o-mini-tts (voice=alloy)...")
 
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
@@ -760,34 +760,37 @@ def create_tts_audio_shimmer(text, voice="shimmer"):
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(text)} תווים")
 
-        print(f"🎵 יוצר קול עבור: {text[:100]}... (ElevenLabs)")
+        print(f"🎵 יוצר קול עבור: {text[:100]}... (OpenAI)")
         print(f"📊 אורך הטקסט הסופי: {len(text)} תווים")
 
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
-        headers = {
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-            "xi-api-key": ELEVEN_API_KEY,
-        }
-        body = {
-            "text": text,
-            "voice_settings": {
-                "stability": 0.4,
-                "similarity_boost": 0.8,
-                "style": 0.5,
-                "use_speaker_boost": True,
-            },
-        }
+        # השתמש ב-OpenAI TTS עם הזרמה לקובץ זמני ואז קריאה כ-bytes
+        temp_path = None
+        try:
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            temp_path = tmp.name
+            tmp.close()
 
-        resp = requests.post(url, headers=headers, data=json.dumps(body))
-        if resp.status_code != 200:
-            print(f"❌ שגיאה מ-ElevenLabs TTS: {resp.status_code} {resp.text}")
-            return None
+            # שימוש בלקוח OpenAI שכבר מאותחל עם מפתח מהסביבה
+            with client.audio.speech.with_streaming_response.create(
+                model="gpt-4o-mini-tts",
+                voice="alloy",
+                input=text
+            ) as response:
+                response.stream_to_file(temp_path)
 
-        audio_bytes = resp.content
+            # קרא את ה-MP3 כ-bytes
+            with open(temp_path, "rb") as f:
+                audio_bytes = f.read()
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
 
         if not audio_bytes:
-            print("❌ ElevenLabs החזיר אודיו ריק")
+            print("❌ OpenAI החזיר אודיו ריק")
             return None
 
         print(f"✅ קול נוצר בהצלחה: {len(audio_bytes)} bytes")
@@ -808,11 +811,11 @@ def create_tts_audio_shimmer(text, voice="shimmer"):
 
         print(f"🎵 קובץ MP3 מוכן לשליחה: {len(audio_bytes)} bytes")
 
-        # מחזיר את ה-bytes ישירות - ללא שמירת קובץ זמני
+        # מחזיר את ה-bytes ישירות - ללא שינוי לוגיקה קיימת
         return audio_bytes
 
     except Exception as e:
-        print(f"❌ שגיאה ב-TTS: {e}")
+        print(f"❌ שגיאה ב-TTS (OpenAI): {e}")
         import traceback
         traceback.print_exc()
         return None
