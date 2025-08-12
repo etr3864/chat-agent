@@ -195,6 +195,48 @@ def handle_admin_commands(message, sender):
             except Exception as e:
                 return f"❌ שגיאה בבדיקת בריאות המערכת: {e}"
         
+        # בדיקת מערכת הסיכום האוטומטי
+        elif message_lower in ["בדוק סיכום", "summary status", "מערכת סיכום"]:
+            try:
+                from auto_summarizer import get_auto_summarizer_status
+                status = get_auto_summarizer_status()
+                status_text = "📝 סטטוס מערכת הסיכום האוטומטי:\n\n"
+                status_text += f"🔄 פעילה: {'כן' if status['running'] else 'לא'}\n"
+                status_text += f"⏱️ מרווח בדיקה: {status['check_interval']} שניות\n"
+                status_text += f"📊 סה\"כ שיחות: {status['total_conversations']}\n"
+                status_text += f"✅ שיחות מסוכמות: {status['summarized_conversations']}\n"
+                status_text += f"🔄 שיחות פעילות: {status['active_conversations']}\n"
+                return status_text
+            except Exception as e:
+                return f"❌ שגיאה בבדיקת מערכת הסיכום: {e}"
+        
+        # הפעלת מערכת הסיכום האוטומטי
+        elif message_lower in ["הפעל סיכום", "start summary", "הפעל מערכת סיכום"]:
+            try:
+                from auto_summarizer import start_auto_summarizer
+                start_auto_summarizer()
+                return "✅ מערכת הסיכום האוטומטי הופעלה"
+            except Exception as e:
+                return f"❌ שגיאה בהפעלת מערכת הסיכום: {e}"
+        
+        # עצירת מערכת הסיכום האוטומטי
+        elif message_lower in ["עצור סיכום", "stop summary", "עצור מערכת סיכום"]:
+            try:
+                from auto_summarizer import stop_auto_summarizer
+                stop_auto_summarizer()
+                return "🛑 מערכת הסיכום האוטומטי הופסקה"
+            except Exception as e:
+                return f"❌ שגיאה בעצירת מערכת הסיכום: {e}"
+        
+        # סיכום כפוי לכל השיחות הישנות
+        elif message_lower in ["סכם הכל", "summarize all", "סיכום כפוי"]:
+            try:
+                from auto_summarizer import force_summarize_all
+                force_summarize_all()
+                return "🔄 סיכום כפוי לכל השיחות הישנות הושלם"
+            except Exception as e:
+                return f"❌ שגיאה בסיכום כפוי: {e}"
+        
         # סטטיסטיקות מערכת קולית
         elif message_lower in ["סטט קול", "voice stats", "voice statistics", "סטטיסטיקות קול"]:
             try:
@@ -286,14 +328,24 @@ try:
     INSTANCE_ID = os.environ["ULTRA_INSTANCE_ID"]
     TOKEN = os.environ["ULTRA_TOKEN"]
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+    ELEVEN_API_KEY = os.environ["ELEVEN_API_KEY"]
     
     print("✅ INSTANCE_ID:", INSTANCE_ID)
     print("✅ TOKEN prefix:", TOKEN[:5] + "*****")
     print("✅ OPENAI_API_KEY prefix:", OPENAI_API_KEY[:10] + "*****")
+    print("✅ ELEVEN_API_KEY prefix:", ELEVEN_API_KEY[:5] + "*****")
     
 except KeyError as e:
     print(f"❌ שגיאה: משתנה סביבה חסר: {e}")
     raise
+
+# הפעל את מערכת הסיכום האוטומטי
+try:
+    from auto_summarizer import start_auto_summarizer
+    start_auto_summarizer()
+    print("✅ מערכת הסיכום האוטומטי הופעלה")
+except Exception as e:
+    print(f"⚠️ לא הצלחתי להפעיל את מערכת הסיכום האוטומטי: {e}")
 
 # התחברות ל־OpenAI עבור תמלול ו-TTS
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -454,33 +506,51 @@ def transcribe_audio(audio_data):
         return None
 
 def text_to_speech(text, language="he"):
-    """המר טקסט לדיבור באמצעות OpenAI TTS"""
+    """המר טקסט לדיבור באמצעות ElevenLabs TTS - מחזיר bytes של MP3"""
     try:
-        # בדוק שהטקסט לא ריק
         if not text or not text.strip():
             print("⚠️ טקסט ריק ל-TTS")
             return None
-        
-        # הגבל אורך הטקסט (OpenAI מגביל ל-4096 תווים)
+
+        # שמירה על אותו כלל קיצור כמו קודם
         if len(text) > 4000:
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {len(text)} תווים")
-        
-        print(f"🎵 יוצר קול עבור: {text[:100]}...")
-        
-        response = client.audio.speech.create(
-            model="gpt-4o-mini-tts",
-            voice="shimmer",  # קול גברי מתקדם
-            input=text,
-            speed=1.0,
-            response_format="mp3"  # וודא שזה MP3
-        )
-        
-        print(f"✅ קול נוצר בהצלחה: {len(response.content)} bytes")
-        return response.content
-        
+
+        print(f"🎵 [ElevenLabs] יוצר קול עבור: {text[:100]}...")
+
+        url = "https://api.elevenlabs.io/v1/text-to-speech/cgSgspJ2msm6clMCkdW9"
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": ELEVEN_API_KEY,
+        }
+        payload = {
+            "text": text,
+            "model_id": "eleven_multilingual_v3",
+            "voice_settings": {
+                "stability": 0.4,
+                "similarity_boost": 0.8,
+                "style": 0.5,
+                "use_speaker_boost": True,
+            },
+        }
+
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        if resp.status_code != 200:
+            print(f"❌ שגיאה מ-ElevenLabs: {resp.status_code} - {resp.text[:200]}")
+            return None
+
+        audio_bytes = resp.content
+        if not audio_bytes or len(audio_bytes) < 1000:
+            print("⚠️ קובץ אודיו ריק או קטן מדי מ-ElevenLabs")
+            return None
+
+        print(f"✅ קול נוצר בהצלחה מ-ElevenLabs: {len(audio_bytes)} bytes")
+        return audio_bytes
+
     except Exception as e:
-        print(f"❌ שגיאה ב-TTS: {e}")
+        print(f"❌ שגיאה ב-TTS (ElevenLabs): {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -599,72 +669,68 @@ def transcribe_voice_message(file_url):
         return None
 
 def create_tts_audio_shimmer(text, voice="shimmer"):
-    """צור אודיו באמצעות OpenAI TTS עם קול מתקדם - מחזיר bytes במקום נתיב לקובץ
-    
-    Args:
-        text (str): הטקסט להמרה לדיבור
-        voice (str): הקול לבחירה - alloy, shimmer, fable, onyx, nova, shimmer
-    """
+    """צור אודיו באמצעות ElevenLabs TTS - מחזיר bytes במקום נתיב לקובץ"""
     try:
-        print(f"🎵 מתחיל יצירת אודיו עם TTS shimmer (גברי)...")
-        
-        # בדוק שהטקסט לא ריק
+        print("🎵 מתחיל יצירת אודיו עם ElevenLabs (Jessica)...")
+
         if not text or not text.strip():
             print("⚠️ טקסט ריק ל-TTS")
             return None
-        
-        # הגבל אורך הטקסט (OpenAI מגביל ל-4096 תווים)
+
         original_length = len(text)
         if original_length > 4000:
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(text)} תווים")
-        
-        print(f"🎵 יוצר קול עם shimmer (גברי) עבור: {text[:100]}...")
+
+        print(f"🎵 יוצר קול (ElevenLabs) עבור: {text[:100]}...")
         print(f"📊 אורך הטקסט הסופי: {len(text)} תווים")
-        
-        # הגדרות מיטביות ל-TTS
-        tts_options = {
-            "model": "gpt-4o-mini-tts",
-            "voice": "shimmer",  # קול גברי מתקדם
-            "input": text,
-            "speed": 1.0,  # מהירות רגילה
-            "response_format": "mp3"  # וודא שזה MP3
+
+        url = "https://api.elevenlabs.io/v1/text-to-speech/cgSgspJ2msm6clMCkdW9"
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": ELEVEN_API_KEY,
         }
-        
-        print(f"🎵 הגדרות TTS: {tts_options}")
-        
-        # יצירת האודיו עם OpenAI TTS
-        response = client.audio.speech.create(**tts_options)
-        
-        audio_bytes = response.content
-        
-        if not audio_bytes:
-            print("❌ OpenAI החזיר אודיו ריק")
+        payload = {
+            "text": text,
+            "model_id": "eleven_multilingual_v3",
+            "voice_settings": {
+                "stability": 0.4,
+                "similarity_boost": 0.8,
+                "style": 0.5,
+                "use_speaker_boost": True,
+            },
+        }
+
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        if resp.status_code != 200:
+            print(f"❌ שגיאה מ-ElevenLabs: {resp.status_code} - {resp.text[:200]}")
             return None
-        
+
+        audio_bytes = resp.content
+
+        if not audio_bytes:
+            print("❌ ElevenLabs החזיר אודיו ריק")
+            return None
+
         print(f"✅ קול נוצר בהצלחה: {len(audio_bytes)} bytes")
         print(f"📊 גודל קובץ MP3: {len(audio_bytes)} bytes")
-        
-        # בדיקה נוספת - וודא שהאודיו לא ריק
+
         if len(audio_bytes) < 1000:
             print(f"⚠️ קובץ אודיו קטן מדי: {len(audio_bytes)} bytes")
             return None
-        
-        # בדיקה - וודא שהאודיו לא גדול מדי (WhatsApp מגביל ל-16MB)
+
         if len(audio_bytes) > 16 * 1024 * 1024:
             print(f"⚠️ קובץ אודיו גדול מדי: {len(audio_bytes)} bytes (מעל 16MB)")
-            # נסה לקצר את הטקסט
             shortened_text = text[:2000] + "..."
             print(f"🔄 מנסה עם טקסט מקוצר: {len(shortened_text)} תווים")
             return create_tts_audio_shimmer(shortened_text)
-        
+
         print(f"🎵 קובץ MP3 מוכן לשליחה: {len(audio_bytes)} bytes")
-        
-        # מחזיר את ה-bytes ישירות - ללא שמירת קובץ זמני
         return audio_bytes
-        
+
     except Exception as e:
-        print(f"❌ שגיאה ב-TTS: {e}")
+        print(f"❌ שגיאה ב-TTS (ElevenLabs): {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -1474,10 +1540,17 @@ def whatsapp_webhook():
 6️⃣ **עצירת בוט** - שלח "עצור בוט [מספר]"
 7️⃣ **הפעלת בוט** - שלח "הפעל בוט [מספר]"
 
+🔧 **מערכת הסיכום האוטומטי:**
+8️⃣ **בדיקת מערכת סיכום** - שלח "בדוק סיכום"
+9️⃣ **הפעלת מערכת סיכום** - שלח "הפעל סיכום"
+🔟 **עצירת מערכת סיכום** - שלח "עצור סיכום"
+1️⃣1️⃣ **סיכום כפוי לכל השיחות** - שלח "סכם הכל"
+
 💡 דוגמאות:
 - "חפש יוסי"
 - "בדוק בוט 972123456789"
 - "עצור בוט 972123456789"
+- "בדוק סיכום"
 
 איזה פעולה תרצה לבצע?"""
             send_whatsapp_message(sender, admin_menu)
@@ -1488,18 +1561,21 @@ def whatsapp_webhook():
             print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה")
             return "OK", 200  # לא שולח תשובה, אבל מקבל את ההודעה
         
-        # הבוט פעיל - עבד את ההודעה
-        print(f"🤖 מעבד הודעה עם GPT...")
-        reply = chat_with_gpt(message, user_id=sender)
-        print(f"💬 תשובת GPT: {reply}")
-        
-        # חישוב עיכוב חכם לפי אורך ההודעה
-        delay = calculate_smart_delay(len(message), "text")
-        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה...")
-        time.sleep(delay)
-        
-        # שלח תשובת טקסט רגילה
-        send_whatsapp_message(sender, reply)
+        # הבוט פעיל - איסוף הודעות ודיבאונס כדי לשלוח תשובה אחת
+        print(f"🤖 אוסף הודעה למאגר וממתין לשקט...")
+        from chatbot import add_message_to_buffer, wait_for_buffer_and_get_reply, BUFFER_TIMEOUT
+
+        # הוסף למאגר והמתן לשקט של BUFFER_TIMEOUT
+        add_message_to_buffer(sender, message)
+        final_reply = wait_for_buffer_and_get_reply(sender, timeout=max(3.0, BUFFER_TIMEOUT + 0.5))
+
+        if final_reply:
+            print(f"💬 תשובה סופית מאוחדת: {final_reply}")
+            # עיכוב חכם לפני שליחה
+            delay = calculate_smart_delay(len(final_reply), "text")
+            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה...")
+            time.sleep(delay)
+            send_whatsapp_message(sender, final_reply)
         
         return "OK", 200
 
@@ -1548,13 +1624,16 @@ def handle_voice_message(payload, sender):
             send_whatsapp_message(sender, "הבוט לא פעיל כרגע. שלח 'מעכשיו ההתכתבות שלך תמשיך עם הבוט' כדי להפעיל אותו.")
             return "OK", 200
         
-        # 3. עבד את הטקסט המתומלל עם GPT
-        print("🤖 מעבד עם GPT...")
-        reply = chat_with_gpt(transcribed_text, user_id=sender)
-        print(f"💬 תשובת GPT: {reply}")
+        # 3. איסוף הודעות ודיבאונס כדי לשלוח תשובה אחת (קולי או טקסט)
+        print("🤖 אוסף הודעה קולית למאגר וממתין לשקט...")
+        from chatbot import add_message_to_buffer, wait_for_buffer_and_get_reply, BUFFER_TIMEOUT
+        add_message_to_buffer(sender, transcribed_text)
+        reply = wait_for_buffer_and_get_reply(sender, timeout=max(3.0, BUFFER_TIMEOUT + 0.5))
+        if not reply:
+            reply = transcribed_text  # fallback נדיר, אך לא נשלח מיידית טקסט ביניים
         
         # חישוב עיכוב חכם לפי אורך ההודעה הקולית
-        delay = calculate_smart_delay(len(transcribed_text), "audio")
+        delay = calculate_smart_delay(len(reply), "audio")
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
@@ -1569,7 +1648,7 @@ def handle_voice_message(payload, sender):
             traceback.print_exc()
         
         if not audio_bytes:
-            print("❌ יצירת אודיו נכשלה, שולח טקסט...")
+            print("❌ יצירת אודיו נכשלה, שולח טקסט במקום...")
             # חישוב עיכוב חכם לפני שליחת טקסט
             delay = calculate_smart_delay(len(reply), "text")
             print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
@@ -1722,16 +1801,17 @@ def handle_image_message(payload, sender):
         print(f"📝 הודעה לעיבוד: {message_to_process}")
         
         # עבד את ההודעה
-        reply = chat_with_gpt(message_to_process, user_id=sender)
-        print(f"💬 תשובת GPT: {reply}")
+        from chatbot import get_buffered_reply, is_buffer_empty
         
-        # חישוב עיכוב חכם לפי אורך ההודעה וסוג התמונה
-        delay = calculate_smart_delay(len(message_to_process), "image")
-        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה לתמונה...")
-        time.sleep(delay)
-        
-        # שלח תשובת טקסט רגילה
-        send_whatsapp_message(sender, reply)
+        # שימוש באיסוף הודעות ודיבאונס כדי לשלוח רק תשובה אחת
+        from chatbot import add_message_to_buffer, wait_for_buffer_and_get_reply, BUFFER_TIMEOUT
+        add_message_to_buffer(sender, message_to_process)
+        reply = wait_for_buffer_and_get_reply(sender, timeout=max(3.0, BUFFER_TIMEOUT + 0.5))
+        if reply:
+            delay = calculate_smart_delay(len(reply), "image")
+            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה לתמונה...")
+            time.sleep(delay)
+            send_whatsapp_message(sender, reply)
         
         return "OK", 200
         

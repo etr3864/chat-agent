@@ -21,6 +21,100 @@ conversations = {}
 # מעקב אחרי זמני הודעות אחרונות
 last_message_times = {}
 
+# מערכת לאיסוף הודעות מרובות
+message_buffers = {}  # מאגר הודעות לכל משתמש
+buffer_timers = {}    # טיימרים לניקוי המאגר
+BUFFER_TIMEOUT = 3.0  # שניות להמתנה לפני שליחת תשובה
+last_buffer_update = {}  # זמן עדכון אחרון של המאגר לכל משתמש (לצורך דיבאונס)
+
+import threading
+import time
+
+def add_message_to_buffer(user_id: str, message: str):
+    """הוסף הודעה למאגר של משתמש מסוים"""
+    if user_id not in message_buffers:
+        message_buffers[user_id] = []
+    
+    message_buffers[user_id].append(message)
+    # עדכן את זמן הפעילות האחרון של המאגר לצורך דיבאונס
+    last_buffer_update[user_id] = time.time()
+    
+    # בטל טיימר קיים אם יש
+    if user_id in buffer_timers:
+        try:
+            buffer_timers[user_id].cancel()
+            print(f"⏰ טיימר קיים בוטל עבור {user_id}")
+        except:
+            pass  # אם הטיימר כבר לא פעיל
+    
+    # צור טיימר חדש
+    try:
+        timer = threading.Timer(BUFFER_TIMEOUT, lambda: process_buffered_messages(user_id))
+        buffer_timers[user_id] = timer
+        timer.start()
+        print(f"⏰ טיימר נוצר עבור {user_id} - {BUFFER_TIMEOUT} שניות")
+    except Exception as e:
+        print(f"⚠️ שגיאה ביצירת טיימר: {e}")
+    
+    print(f"📥 הודעה נוספה למאגר של {user_id}. סה\"כ במאגר: {len(message_buffers[user_id])}")
+
+def process_buffered_messages(user_id: str):
+    """עבד את כל ההודעות במאגר של משתמש מסוים"""
+    if user_id not in message_buffers or not message_buffers[user_id]:
+        return None
+    
+    # קח את כל ההודעות מהמאגר
+    messages = message_buffers[user_id].copy()
+    message_buffers[user_id].clear()
+    
+    # בטל את הטיימר
+    if user_id in buffer_timers:
+        try:
+            buffer_timers[user_id].cancel()
+            del buffer_timers[user_id]
+            print(f"⏰ טיימר בוטל עבור {user_id}")
+        except:
+            pass  # אם הטיימר כבר לא פעיל
+    
+    print(f"🔄 מעבד {len(messages)} הודעות מהמאגר של {user_id}")
+    
+    # אם יש רק הודעה אחת, עבד אותה כרגיל
+    if len(messages) == 1:
+        reply = process_single_message(user_id, messages[0])
+    else:
+        # אם יש כמה הודעות, עבד אותן יחד
+        reply = process_multiple_messages(user_id, messages)
+    
+    # שלח את התשובה דרך ה-webhook (אם יש)
+    if reply:
+        print(f"💬 תשובה מוכנה מהמאגר: {reply}")
+        # התשובה תישלח דרך ה-webhook
+    
+    return reply
+
+def process_single_message(user_id: str, message: str):
+    """עבד הודעה אחת - הפונקציה המקורית"""
+    # הפעל את הפונקציה המקורית
+    reply = chat_with_gpt_original(message, user_id)
+    
+    # החזר את התשובה (ה-webhook ישלח אותה)
+    return reply
+
+def process_multiple_messages(user_id: str, messages: list):
+    """עבד כמה הודעות יחד"""
+    # צור הודעה מאוחדת
+    combined_message = "\n\n".join([f"הודעה {i+1}: {msg}" for i, msg in enumerate(messages)])
+    
+    print(f"🔗 הודעות מאוחדות: {combined_message}")
+    
+    # עבד את ההודעה המאוחדת
+    reply = chat_with_gpt_original(combined_message, user_id)
+    
+    # החזר את התשובה (ה-webhook ישלח אותה)
+    return reply
+
+# הפונקציה הזו לא נמצאת בשימוש - נמחקה
+
 # פונקציה לטעינת הפרומפט מקובץ חיצוני
 def load_system_prompt():
     """טען את הפרומפט מקובץ חיצוני"""
@@ -366,6 +460,23 @@ def get_missing_business_info(conversation_history: list) -> str:
 # בדיקה ושיכום שיחות ישנות שלא קיבלו סיכום
 def check_and_summarize_old_conversations():
     """בדוק שיחות ישנות שלא קיבלו סיכום ובצע סיכום אוטומטי"""
+    # הפונקציה הזו עכשיו משתמשת במערכת הסיכום האוטומטי החדשה
+    try:
+        from auto_summarizer import auto_summarizer
+        if auto_summarizer.running:
+            # המערכת האוטומטית כבר רצה, לא צריך לעשות כלום
+            return
+        else:
+            # המערכת לא רצה, הפעל אותה
+            auto_summarizer.start()
+            print("✅ מערכת הסיכום האוטומטי הופעלה מ-chatbot.py")
+    except Exception as e:
+        print(f"⚠️ לא הצלחתי להפעיל את מערכת הסיכום האוטומטי: {e}")
+        # נסה את השיטה הישנה
+        _legacy_check_and_summarize()
+        
+def _legacy_check_and_summarize():
+    """שיטה ישנה לסיכום שיחות - גיבוי"""
     current_time = datetime.now()
     
     for user_id, conversation in conversations.items():
@@ -389,8 +500,8 @@ def check_and_summarize_old_conversations():
                         print(f"⚠️ שגיאה בסיכום אוטומטי: {e}")
                         pass
 
-# פונקציית שיחה
-def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
+# פונקציית שיחה מקורית (לפני השינויים)
+def chat_with_gpt_original(user_message: str, user_id: str = "default") -> str:
     # בדוק שיחות ישנות שלא קיבלו סיכום
     check_and_summarize_old_conversations()
     
@@ -479,3 +590,102 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     save_conversation_to_file(user_id)
 
     return reply
+
+# פונקציית שיחה חדשה שמשתמשת במאגר הודעות
+
+def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
+    """גרסה חדשה שמשתמשת במאגר הודעות למניעת תשובות מרובות"""
+    # הוסף את ההודעה למאגר
+    add_message_to_buffer(user_id, user_message)
+    
+    # אם זו ההודעה הראשונה, החזר הודעה מיידית
+    if len(message_buffers[user_id]) == 1:
+        return "אני קורא את ההודעה שלך... 📖"
+    
+    # אם יש הודעה נוספת, החזר הודעה על המתנה
+    return f"אני קורא את ההודעות שלך... 📖 ({len(message_buffers[user_id])} הודעות)"
+
+def get_buffered_reply(user_id: str) -> str:
+    """קבל תשובה מוכנה מהמאגר אם יש"""
+    if user_id in message_buffers and message_buffers[user_id]:
+        # יש הודעות במאגר - עבד אותן עכשיו
+        messages = message_buffers[user_id].copy()
+        message_buffers[user_id].clear()
+        
+        # בטל את הטיימר אם יש
+        if user_id in buffer_timers:
+            try:
+                buffer_timers[user_id].cancel()
+                del buffer_timers[user_id]
+                print(f"⏰ טיימר בוטל עבור {user_id} (בקשה מיידית)")
+            except:
+                pass  # אם הטיימר כבר לא פעיל
+        
+        print(f"🔄 מעבד {len(messages)} הודעות מהמאגר של {user_id} (בקשה מיידית)")
+        
+        # עבד את ההודעות
+        if len(messages) == 1:
+            reply = process_single_message(user_id, messages[0])
+        else:
+            reply = process_multiple_messages(user_id, messages)
+        
+        # שלח את התשובה דרך ה-webhook (אם יש)
+        if reply:
+            print(f"💬 תשובה מוכנה מהמאגר (בקשה מיידית): {reply}")
+            # התשובה תישלח דרך ה-webhook
+        
+        return reply
+    
+    return None  # אין תשובה מוכנה
+
+def is_buffer_empty(user_id: str) -> bool:
+    """בדוק אם המאגר של משתמש מסוים ריק"""
+    return user_id not in message_buffers or not message_buffers[user_id]
+
+def wait_for_buffer_and_get_reply(user_id: str, timeout: float = 3.0) -> str:
+    """המתן לחלון שקט (דיבאונס) ואז עבד את כל ההודעות במאגר והחזר תשובה אחת"""
+    start_time = time.time()
+
+    # המתן עד שמתקבל שקט של BUFFER_TIMEOUT או עד שפג הזמן הכולל
+    while time.time() - start_time < timeout:
+        has_messages = user_id in message_buffers and bool(message_buffers[user_id])
+        last_update = last_buffer_update.get(user_id, 0)
+        time_since_update = time.time() - last_update if last_update else None
+
+        # אם אין הודעות כלל, חכה קצר והמשך
+        if not has_messages:
+            time.sleep(0.1)
+            continue
+
+        # אם יש הודעות, בדוק אם עבר זמן שקט מספק מאז ההודעה האחרונה
+        if time_since_update is not None and time_since_update >= BUFFER_TIMEOUT:
+            break  # יש שקט מספיק - אפשר לעבד
+
+        # אחרת, המשך להמתין
+        time.sleep(0.1)
+
+    # אם יש הודעות - עבד את הכל יחד
+    if user_id in message_buffers and message_buffers[user_id]:
+        messages = message_buffers[user_id].copy()
+        message_buffers[user_id].clear()
+
+        # בטל את הטיימר אם יש
+        if user_id in buffer_timers:
+            try:
+                buffer_timers[user_id].cancel()
+                del buffer_timers[user_id]
+                print(f"⏰ טיימר בוטל עבור {user_id} (דיבאונס)")
+            except:
+                pass
+
+        print(f"🔄 מעבד {len(messages)} הודעות מהמאגר של {user_id} (דיבאונס)")
+
+        # עבד את ההודעות
+        if len(messages) == 1:
+            reply = process_single_message(user_id, messages[0])
+        else:
+            reply = process_multiple_messages(user_id, messages)
+
+        return reply
+
+    return None  # אין הודעות במאגר
