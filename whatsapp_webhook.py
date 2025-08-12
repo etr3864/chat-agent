@@ -21,7 +21,7 @@ import schedule
 
 # OpenAI TTS מודל מתקדם
 # gpt-4o-mini-tts הוא המודל העדכני ביותר להמרת טקסט לדיבור
-# קולות זמינים: alloy, verse, fable, onyx, nova, verse
+# קולות זמינים: alloy, coral, fable, onyx, nova, coral
 # איכות קול גבוהה יותר וזמני תגובה קצרים
 
 # טען משתני סביבה
@@ -744,7 +744,7 @@ def transcribe_voice_message(file_url):
         traceback.print_exc()
         return None
 
-def create_tts_audio_verse(text, voice="verse"):
+def create_tts_audio_coral(text, voice="coral"):
     """צור אודיו באמצעות OpenAI gpt-4o-mini-tts (voice=alloy) - מחזיר bytes של MP3"""
     try:
         print("🎵 מתחיל יצירת אודיו עם OpenAI gpt-4o-mini-tts (voice=alloy)...")
@@ -807,7 +807,7 @@ def create_tts_audio_verse(text, voice="verse"):
             # נסה לקצר את הטקסט
             shortened_text = text[:2000] + "..."
             print(f"🔄 מנסה עם טקסט מקוצר: {len(shortened_text)} תווים")
-            return create_tts_audio_verse(shortened_text)
+            return create_tts_audio_coral(shortened_text)
 
         print(f"🎵 קובץ MP3 מוכן לשליחה: {len(audio_bytes)} bytes")
 
@@ -1125,7 +1125,7 @@ def send_audio_via_ultramsg_documentation(to, audio_bytes, caption=""):
         traceback.print_exc()
         return False
 
-def send_audio_via_ultramsg_reversed(to, audio_bytes, caption=""):
+def send_audio_via_ultramsg_recorald(to, audio_bytes, caption=""):
     """שלח אודיו עם סדר פרמטרים שונה - אולי הבעיה היא בסדר"""
     try:
         print(f"🎵 שולח אודיו עם סדר פרמטרים שונה ל: {to}")
@@ -1709,11 +1709,11 @@ def handle_voice_message(payload, sender):
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
-        # 4. צור תגובה קולית עם OpenAI TTS קול verse (גברי)
-        print("🎵 יוצר תגובה קולית עם קול verse (גברי)...")
+        # 4. צור תגובה קולית עם OpenAI TTS קול coral (גברי)
+        print("🎵 יוצר תגובה קולית עם קול coral (גברי)...")
         audio_bytes = None
         try:
-            audio_bytes = create_tts_audio_verse(reply)
+            audio_bytes = create_tts_audio_coral(reply)
         except Exception as e:
             print(f"❌ שגיאה ביצירת אודיו: {e}")
             import traceback
@@ -1742,7 +1742,7 @@ def handle_voice_message(payload, sender):
             ("send_audio_via_ultramsg_simple", send_audio_via_ultramsg_simple),
             ("send_audio_via_ultramsg_alternative", send_audio_via_ultramsg_alternative),
             ("send_audio_via_ultramsg_documentation", send_audio_via_ultramsg_documentation),
-            ("send_audio_via_ultramsg_reversed", send_audio_via_ultramsg_reversed),
+            ("send_audio_via_ultramsg_recorald", send_audio_via_ultramsg_recorald),
             ("send_audio_via_ultramsg_form_data", send_audio_via_ultramsg_form_data),
             ("send_audio_via_ultramsg_json", send_audio_via_ultramsg_json)
         ]
