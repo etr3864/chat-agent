@@ -71,6 +71,30 @@ def update_last_message_time(user_id):
     last_message_times[user_id] = datetime.now()
     print(f"⏰ זמן הודעה אחרונה עודכן עבור: {user_id}")
 
+def check_for_auto_summary_by_message_count(user_id):
+    """בדוק אם צריך לבצע סיכום אוטומטי לפי מספר הודעות"""
+    try:
+        from chatbot import conversations, summarize_conversation, save_conversation_summary, save_conversation_to_file
+        from conversation_summaries import summaries_manager
+        
+        if user_id not in conversations:
+            return
+        
+        # ספור הודעות משתמש
+        user_messages = [m for m in conversations[user_id] if m["role"] == "user"]
+        
+        # בדוק אם יש 8 הודעות או יותר ואין עדיין סיכום
+        if len(user_messages) >= 8:
+            existing_summary = summaries_manager.get_summary(user_id)
+            if not existing_summary:
+                print(f"🔄 מבצע סיכום אוטומטי לפי מספר הודעות ({len(user_messages)}): {user_id}")
+                summary = summarize_conversation(user_id)
+                save_conversation_summary(user_id, summary)
+                save_conversation_to_file(user_id)
+                print(f"✅ סיכום אוטומטי הושלם לפי מספר הודעות עבור: {user_id}")
+    except Exception as e:
+        print(f"⚠️ שגיאה בבדיקת סיכום לפי מספר הודעות עבור {user_id}: {e}")
+
 def check_and_summarize_old_conversations():
     """בדוק שיחות ישנות שלא קיבלו סיכום ובצע סיכום אוטומטי"""
     try:
@@ -89,19 +113,35 @@ def check_and_summarize_old_conversations():
         
         for user_id, conversation in conversations.items():
             try:
-                # בדוק אם יש שיחה עם יותר מ-5 הודעות (הורדתי מ-10 ל-5)
-                user_assistant_messages = [m for m in conversation if m["role"] in ["user", "assistant"]]
-                if len(user_assistant_messages) >= 5:
-                    # בדוק אם עבר זמן רב מההודעה האחרונה (יותר משעה)
+                # בדוק אם יש שיחה עם לפחות 2 הודעות מצד הלקוח
+                user_messages = [m for m in conversation if m["role"] == "user"]
+                if len(user_messages) >= 2:
+                    # בדוק אם עבר זמן רב מההודעה האחרונה (יותר מ-30 דקות)
                     if user_id in last_message_times:
                         time_diff = current_time - last_message_times[user_id]
-                        if time_diff.total_seconds() > 3600:  # שעה
+                        if time_diff.total_seconds() > 1800:  # 30 דקות
                             # בדוק אם כבר יש סיכום בקובץ ה-JSON
                             try:
                                 from conversation_summaries import summaries_manager
                                 existing_summary = summaries_manager.get_summary(user_id)
                                 if not existing_summary:
-                                    print(f"🔄 מבצע סיכום אוטומטי לשיחה ישנה: {user_id}")
+                                    print(f"🔄 מבצע סיכום אוטומטי לשיחה ישנה: {user_id} (זמן)")
+                                    summary = summarize_conversation(user_id)
+                                    save_conversation_summary(user_id, summary)
+                                    save_conversation_to_file(user_id)
+                                    summarized_count += 1
+                                    print(f"✅ סיכום אוטומטי הושלם עבור: {user_id}")
+                            except Exception as e:
+                                print(f"⚠️ שגיאה בסיכום אוטומטי עבור {user_id}: {e}")
+                                continue
+                    else:
+                        # אם אין זמן אחרון, בדוק אם יש הרבה הודעות (6-8)
+                        if len(user_messages) >= 6:
+                            try:
+                                from conversation_summaries import summaries_manager
+                                existing_summary = summaries_manager.get_summary(user_id)
+                                if not existing_summary:
+                                    print(f"🔄 מבצע סיכום אוטומטי לשיחה עם {len(user_messages)} הודעות: {user_id}")
                                     summary = summarize_conversation(user_id)
                                     save_conversation_summary(user_id, summary)
                                     save_conversation_to_file(user_id)
@@ -129,15 +169,15 @@ def run_auto_summary_scheduler():
     try:
         print("⏰ מפעיל מערכת סיכום אוטומטי...")
         
+        # בדוק שיחות ישנות כל 10 דקות
+        schedule.every(10).minutes.do(check_and_summarize_old_conversations)
+        
         # בדוק שיחות ישנות כל 30 דקות
         schedule.every(30).minutes.do(check_and_summarize_old_conversations)
         
-        # בדוק שיחות ישנות כל שעה
-        schedule.every().hour.do(check_and_summarize_old_conversations)
-        
         print("✅ מערכת סיכום אוטומטי הופעלה")
+        print("   - בדיקה כל 10 דקות")
         print("   - בדיקה כל 30 דקות")
-        print("   - בדיקה כל שעה")
         
         # הרץ בדיקה מיד בהפעלה
         check_and_summarize_old_conversations()
@@ -744,24 +784,136 @@ def transcribe_voice_message(file_url):
         traceback.print_exc()
         return None
 
-def create_tts_audio_coral(text, voice="coral"):
-    """צור אודיו באמצעות OpenAI gpt-4o-mini-tts (voice=alloy) - מחזיר bytes של MP3"""
+def enhance_text_for_voice(text):
+    """שפר את הטקסט לתגובה קולית עם טון שמח ואנושי"""
     try:
-        print("🎵 מתחיל יצירת אודיו עם OpenAI gpt-4o-mini-tts (voice=alloy)...")
+        print("😊 משפר טקסט לתגובה קולית עם טון שמח...")
+        
+        # אם הטקסט ריק, החזר ברירת מחדל שמחה
+        if not text or not text.strip():
+            return "היי! אני כאן לעזור לך! 😊"
+        
+        # הוסף רגשות ותוספות לטקסט כדי להפוך אותו לשמח יותר
+        enhanced_text = text
+        
+        # הוסף הדגשות וביטויים שמחים
+        if not any(emoji in text for emoji in ["😊", "😄", "🙂", "😁"]):
+            # הוסף רגש חיובי לתחילת או סוף המשפט
+            if len(text) > 50:
+                enhanced_text = enhanced_text + " 😊"
+            else:
+                enhanced_text = "😊 " + enhanced_text
+        
+        # הוסף מילות מעבר שמחות
+        happy_transitions = [
+            ("אז", "אז בטח"),
+            ("כן", "כן בהחלט!"),
+            ("לא", "לא, אבל"),
+            ("אבל", "אבל יש לי רעיון טוב!"),
+            ("אוקיי", "אוקיי מעולה!"),
+            ("בסדר", "בסדר גמור!"),
+            ("נכון", "נכון לגמרי!"),
+        ]
+        
+        for old, new in happy_transitions:
+            if f" {old} " in enhanced_text:
+                enhanced_text = enhanced_text.replace(f" {old} ", f" {new} ")
+            elif enhanced_text.startswith(f"{old} "):
+                enhanced_text = enhanced_text.replace(f"{old} ", f"{new} ", 1)
+        
+        # הוסף צחוק והטיות בקול בהתאם למשפט
+        if any(word in enhanced_text.lower() for word in ["מצחיק", "הומור", "בדיחה", "צחוק", "מעניין"]):
+            enhanced_text = enhanced_text + " הה הה! 😄"
+        elif any(word in enhanced_text.lower() for word in ["מעולה", "נהדר", "פנטסטי", "אחלה"]):
+            enhanced_text = enhanced_text + " ממש כיף! 😊"
+        elif any(word in enhanced_text.lower() for word in ["בוא נראה", "אולי", "יכול להיות"]):
+            enhanced_text = enhanced_text.replace("בוא נראה", "בוא נראה... אהה!")
+            enhanced_text = enhanced_text.replace("אולי", "אולי... מעניין!")
+            enhanced_text = enhanced_text.replace("יכול להיות", "יכול להיות... נכון!")
+            
+        # הוסף הדגשות קוליות (מילים שיגרמו לקול להישמע יותר אנושי)
+        voice_enhancements = [
+            ("!", "!"),  # שמור קיימים
+            ("?", "?"),  # שמור קיימים
+            (".", ". "),  # הוסף רווח קטן לנשימה
+            ("כמובן", "כמו-בן"),  # הדגשה
+            ("בהחלט", "בה-חלט"),  # הדגשה
+            ("מעולה", "מע-ו-לה!"),  # הדגשה שמחה
+            ("נהדר", "נה-דר!"),  # הדגשה שמחה
+            ("וואו", "וו-או!"),  # הדגשה מרגשת
+            ("אמת", "א-מת!"),  # הדגשה
+            ("בטח", "בט-ח!"),  # הדגשה
+            ("ברור", "ברו-ור!"),  # הדגשה
+            ("מאוד", "מא-וד"),  # הדגשה
+            ("ממש", "מ-מש"),  # הדגשה
+            ("טוב", "טו-וב"),  # הדגשה קלה
+            ("יפה", "יפ-ה!"),  # הדגשה שמחה
+            ("נחמד", "נח-מד!"),  # הדגשה
+            ("מגניב", "מג-ניב!"),  # הדגשה צעירה
+        ]
+        
+        for old, new in voice_enhancements:
+            enhanced_text = enhanced_text.replace(old, new)
+        
+        # הוסף ביטויי מילוי אנושיים לטקסט ארוך
+        if len(enhanced_text) > 100:
+            # הוסף ביטויים אנושיים באמצע הטקסט
+            human_fillers = [
+                (". ", ". אממ... "),
+                (", ", ", נו... "),
+                (" אבל ", " אבל רגע... "),
+                (" גם ", " גם כן... "),
+                (" או ", " או שמא... "),
+            ]
+            
+            # הוסף רק ביטוי אחד כדי לא להפריז
+            import random
+            if random.random() < 0.3:  # 30% סיכוי להוסיף ביטוי
+                filler = random.choice(human_fillers)
+                if filler[0] in enhanced_text:
+                    enhanced_text = enhanced_text.replace(filler[0], filler[1], 1)
+        
+        # הוסף קריאות עידוד לפי הקשר
+        if any(word in enhanced_text.lower() for word in ["תעזור", "עזרה", "בעיה", "קושי"]):
+            enhanced_text = enhanced_text + " אני כאן בשבילך! 💪"
+        elif any(word in enhanced_text.lower() for word in ["תודה", "מעולה", "נהדר"]):
+            enhanced_text = enhanced_text + " זה הכיף שלי! 🎉"
+        
+        # וודא שהטקסט נגמר בצורה חיובית
+        if not enhanced_text.endswith(("!", "?", "😊", "🙂", "😄", "💪", "🎉")):
+            if "?" in enhanced_text[-10:]:
+                pass  # זו שאלה, תשאר ככה
+            else:
+                enhanced_text = enhanced_text + "!"
+        
+        print(f"✨ טקסט משופר לקול שמח: {enhanced_text[:100]}...")
+        return enhanced_text
+        
+    except Exception as e:
+        print(f"⚠️ שגיאה בשיפור טקסט: {e}")
+        return text  # החזר את הטקסט המקורי במקרה של שגיאה
+
+def create_tts_audio_coral(text, voice="nova"):
+    """צור אודיו באמצעות OpenAI TTS עם קול שמח ואנושי - מחזיר bytes של MP3"""
+    try:
+        print("🎵 מתחיל יצירת אודיו עם OpenAI TTS (קול שמח ואנושי)...")
 
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
             print("⚠️ טקסט ריק ל-TTS")
             return None
 
-        # הגבל אורך הטקסט
-        original_length = len(text)
-        if original_length > 4000:
-            text = text[:4000] + "..."
-            print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(text)} תווים")
+        # שפר את הטקסט לתגובה קולית שמחה
+        enhanced_text = enhance_text_for_voice(text)
 
-        print(f"🎵 יוצר קול עבור: {text[:100]}... (OpenAI)")
-        print(f"📊 אורך הטקסט הסופי: {len(text)} תווים")
+        # הגבל אורך הטקסט
+        original_length = len(enhanced_text)
+        if original_length > 4000:
+            enhanced_text = enhanced_text[:4000] + "..."
+            print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(enhanced_text)} תווים")
+
+        print(f"🎵 יוצר קול עבור: {enhanced_text[:100]}... (OpenAI)")
+        print(f"📊 אורך הטקסט המשופר: {len(enhanced_text)} תווים")
 
         # השתמש ב-OpenAI TTS עם הזרמה לקובץ זמני ואז קריאה כ-bytes
         temp_path = None
@@ -771,11 +923,15 @@ def create_tts_audio_coral(text, voice="coral"):
             temp_path = tmp.name
             tmp.close()
 
-            # שימוש בלקוח OpenAI שכבר מאותחל עם מפתח מהסביבה
+            # שימוש בלקוח OpenAI עם קולות מתאימים:
+            # nova - קול נשי צעיר ואנרגטי (מומלץ לטון שמח)
+            # alloy - קול נייטרלי ובהיר
+            # echo - קול גברי נעים
+            print(f"🎤 משתמש בקול {voice} לתגובה שמחה ואנושית")
             with client.audio.speech.with_streaming_response.create(
-                model="gpt-4o-mini-tts",
-                voice="alloy",
-                input=text
+                model="tts-1",
+                voice=voice,  # nova הוא קול נשי שמח ואנושי
+                input=enhanced_text
             ) as response:
                 response.stream_to_file(temp_path)
 
@@ -793,8 +949,8 @@ def create_tts_audio_coral(text, voice="coral"):
             print("❌ OpenAI החזיר אודיו ריק")
             return None
 
-        print(f"✅ קול נוצר בהצלחה: {len(audio_bytes)} bytes")
-        print(f"📊 גודל קובץ MP3: {len(audio_bytes)} bytes")
+        print(f"✅ קול שמח נוצר בהצלחה: {len(audio_bytes)} bytes")
+        print(f"📊 גודל קובץ MP3 עם טון שמח: {len(audio_bytes)} bytes")
 
         # בדיקה נוספת - וודא שהאודיו לא ריק
         if len(audio_bytes) < 1000:
@@ -1596,6 +1752,9 @@ def whatsapp_webhook():
         # עדכן זמן הודעה אחרונה
         update_last_message_time(sender)
         
+        # בדוק אם צריך לבצע סיכום אוטומטי לפי מספר הודעות
+        check_for_auto_summary_by_message_count(sender)
+        
         # בדוק אם זו פקודת מנהל
         admin_reply = handle_admin_commands(message, sender)
         if admin_reply:
@@ -1693,6 +1852,9 @@ def handle_voice_message(payload, sender):
         # עדכן זמן הודעה אחרונה
         update_last_message_time(sender)
         
+        # בדוק אם צריך לבצע סיכום אוטומטי לפי מספר הודעות
+        check_for_auto_summary_by_message_count(sender)
+        
         # 2. בדוק אם הבוט פעיל למשתמש זה
         if not is_bot_active(sender):
             print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה קולית")
@@ -1709,8 +1871,8 @@ def handle_voice_message(payload, sender):
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
-        # 4. צור תגובה קולית עם OpenAI TTS קול coral (גברי)
-        print("🎵 יוצר תגובה קולית עם קול coral (גברי)...")
+        # 4. צור תגובה קולית עם OpenAI TTS קול nova (שמח ואנושי)
+        print("🎵 יוצר תגובה קולית שמחה ואנושית עם קול nova...")
         audio_bytes = None
         try:
             audio_bytes = create_tts_audio_coral(reply)
@@ -1874,6 +2036,9 @@ def handle_image_message(payload, sender):
         
         # עדכן זמן הודעה אחרונה
         update_last_message_time(sender)
+        
+        # בדוק אם צריך לבצע סיכום אוטומטי לפי מספר הודעות
+        check_for_auto_summary_by_message_count(sender)
         
         # עבד את ההודעה
         reply = chat_with_gpt(message_to_process, user_id=sender)
