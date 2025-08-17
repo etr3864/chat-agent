@@ -24,6 +24,9 @@ last_message_times = {}
 # מעקב אחרי מספר שאלות לכל משתמש
 question_count = {}
 
+# מעקב אחרי משתמשים שקיבלו הודעת העברה ליועץ
+transferred_to_advisor = {}
+
 # פונקציה לטעינת הפרומפט מקובץ חיצוני
 def load_system_prompt():
     """טען את הפרומפט מקובץ חיצוני"""
@@ -460,11 +463,31 @@ def count_questions_in_reply(reply: str) -> int:
     return max(question_marks, question_word_count)
 
 def should_transfer_to_advisor(user_id: str) -> bool:
-    """בדוק אם צריך להעביר ליועץ אחרי 4 שאלות רלוונטיות"""
-    if user_id not in question_count:
+    """בדוק אם צריך להעביר ליועץ - מינימום 5 הודעות משתמש + שעה ללא הודעות"""
+    # בדוק אם כבר הועבר ליועץ
+    if user_id in transferred_to_advisor:
         return False
     
-    return question_count[user_id] >= 4
+    if user_id not in conversations:
+        return False
+    
+    # ספור הודעות משתמש
+    user_messages = [m for m in conversations[user_id] if m["role"] == "user"]
+    if len(user_messages) < 5:
+        return False
+    
+    # בדוק אם עבר יותר משעה מההודעה האחרונה
+    from whatsapp_webhook import last_message_times
+    from datetime import datetime, timedelta
+    
+    if user_id not in last_message_times:
+        return False
+    
+    time_since_last_message = datetime.now() - last_message_times[user_id]
+    if time_since_last_message < timedelta(hours=1):
+        return False
+    
+    return True
 
 # בדיקה ושיכום שיחות ישנות שלא קיבלו סיכום
 # פונקציה זו עברה ל-whatsapp_webhook.py כדי לעבוד עם מערכת הטיימר האוטומטי
@@ -503,6 +526,21 @@ def get_personalized_greeting_response(user_message: str) -> str:
 def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     # בדיקת שיחות ישנות נעשית אוטומטית ב-whatsapp_webhook.py
     # כל 30 דקות ושעה
+    
+    # בדוק אם המשתמש הועבר ליועץ ורוצה להמשיך השיחה
+    if user_id in transferred_to_advisor:
+        # אפשר למשתמש להמשיך השיחה - הסר את הסימון
+        del transferred_to_advisor[user_id]
+        
+        # הוסף הודעה שמאשרת המשך השיחה
+        if user_id not in conversations:
+            conversations[user_id] = [{"role": "system", "content": system_prompt}]
+        
+        conversations[user_id].append({"role": "user", "content": user_message})
+        continue_response = "אוקיי, אני כאן להמשיך לעזור לך! מה עוד אתה רוצה לדעת על דף הנחיתה?"
+        conversations[user_id].append({"role": "assistant", "content": continue_response})
+        save_conversation_to_file(user_id)
+        return continue_response
     
     # בדיקה אם לקוח הגיע למגבלה
     if is_user_at_limit(user_id):
@@ -584,12 +622,20 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
             "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
         )
 
-    # בדוק אם צריך להעביר ליועץ אחרי 4 שאלות
+    # בדוק אם צריך להעביר ליועץ
     if should_transfer_to_advisor(user_id):
+        # סמן שהמשתמש הועבר ליועץ
+        transferred_to_advisor[user_id] = datetime.now()
+        
+        # צור סיכום שיחה לפני ההעברה
+        summary = summarize_conversation(user_id)
+        save_conversation_summary(user_id, summary)
+        save_conversation_to_file(user_id)
+        
         return (
-            "מעולה! אספתי מספיק מידע כדי להתחיל לעבוד על הדף שלך.\n\n"
-            "🎯 אני מעביר אותך עכשיו ליועץ מטעמנו שיכין לך הצעה מותאמת אישית ויסביר לך בדיוק איך הדף יעבוד עבור העסק שלך.\n\n"
-            "היועץ שלנו יחזור אליך תוך מספר שעות. תודה על הסבלנות! 🙏"
+            "אספתי מספיק מידע כדי להתחיל לעבוד על הדף שלך.\n\n"
+            "אני מעביר אותך עכשיו ליועץ מטעמנו שיכין לך הצעה מותאמת אישית ויסביר לך בדיוק איך הדף יעבוד עבור העסק שלך.\n\n"
+            "היועץ שלנו יחזור אליך תוך מספר שעות. תודה על הסבלנות!"
         )
 
     # שלח ל־GPT
