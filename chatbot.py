@@ -21,6 +21,9 @@ conversations = {}
 # מעקב אחרי זמני הודעות אחרונות
 last_message_times = {}
 
+# מעקב אחרי מספר שאלות לכל משתמש
+question_count = {}
+
 # פונקציה לטעינת הפרומפט מקובץ חיצוני
 def load_system_prompt():
     """טען את הפרומפט מקובץ חיצוני"""
@@ -99,6 +102,87 @@ def save_conversation_to_file(user_id: str):
                 f.write(f"{role}: {content}\n\n")
             else:
                 f.write(f"{role}: {content}\n\n")
+    
+    # שמור גם בפורמט JSON לטעינה קלה יותר
+    save_conversation_to_json(user_id)
+
+def save_conversation_to_json(user_id: str):
+    """שמור שיחה בפורמט JSON לטעינה קלה יותר"""
+    try:
+        import json
+        folder = "conversations"
+        os.makedirs(folder, exist_ok=True)
+        
+        json_filepath = os.path.join(folder, f"{user_id}.json")
+        conversation_data = {
+            "user_id": user_id,
+            "last_updated": datetime.now().isoformat(),
+            "messages": conversations.get(user_id, []),
+            "question_count": question_count.get(user_id, 0)
+        }
+        
+        with open(json_filepath, "w", encoding="utf-8-sig") as f:
+            json.dump(conversation_data, f, ensure_ascii=False, indent=2)
+            
+        print(f"💾 שיחה נשמרה ל-JSON: {user_id}")
+        
+    except Exception as e:
+        print(f"⚠️ שגיאה בשמירת שיחה ל-JSON: {e}")
+
+def load_conversation_from_json(user_id: str) -> bool:
+    """טען שיחה מקובץ JSON"""
+    try:
+        import json
+        folder = "conversations"
+        json_filepath = os.path.join(folder, f"{user_id}.json")
+        
+        if not os.path.exists(json_filepath):
+            return False
+            
+        with open(json_filepath, "r", encoding="utf-8-sig") as f:
+            conversation_data = json.load(f)
+        
+        # טען את השיחה
+        conversations[user_id] = conversation_data.get("messages", [])
+        question_count[user_id] = conversation_data.get("question_count", 0)
+        
+        print(f"📂 שיחה נטענה מ-JSON: {user_id} ({len(conversations[user_id])} הודעות, {question_count[user_id]} שאלות)")
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ שגיאה בטעינת שיחה מ-JSON: {e}")
+        return False
+
+def should_continue_existing_conversation(user_id: str) -> bool:
+    """בדוק אם צריך להמשיך שיחה קיימת"""
+    # אם יש שיחה פעילה בזיכרון - המשך אותה
+    if user_id in conversations and len(conversations[user_id]) > 1:
+        return True
+    
+    # נסה לטעון שיחה מהקובץ
+    if load_conversation_from_json(user_id):
+        # בדוק אם השיחה לא ישנה מדי (יותר מ-24 שעות)
+        try:
+            folder = "conversations"
+            json_filepath = os.path.join(folder, f"{user_id}.json")
+            
+            if os.path.exists(json_filepath):
+                # בדוק מתי הקובץ עודכן לאחרונה
+                import time
+                file_time = os.path.getmtime(json_filepath)
+                current_time = time.time()
+                hours_since_update = (current_time - file_time) / 3600
+                
+                if hours_since_update < 24:  # פחות מ-24 שעות
+                    print(f"🔄 ממשיך שיחה קיימת: {user_id} (עודכנה לפני {hours_since_update:.1f} שעות)")
+                    return True
+                else:
+                    print(f"⏰ שיחה ישנה מדי: {user_id} ({hours_since_update:.1f} שעות) - מתחיל שיחה חדשה")
+                    return False
+        except Exception as e:
+            print(f"⚠️ שגיאה בבדיקת זמן קובץ: {e}")
+    
+    return False
 
 # סיכום שיחה קצר
 def summarize_conversation(user_id: str) -> str:
@@ -106,7 +190,7 @@ def summarize_conversation(user_id: str) -> str:
     text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
 
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-5-chat-latest",
         messages=[
             {"role": "system", "content": """אתה מומחה לניתוח שיחות מכירה של VALUE+. סכם את השיחה הזו בצורה מפורטת ומקצועית.
 
@@ -363,6 +447,25 @@ def get_missing_business_info(conversation_history: list) -> str:
     else:
         return f"אני צריך להבין עוד כמה דברים: {', '.join(missing_items[:-1])} ו{missing_items[-1]}."
 
+def count_questions_in_reply(reply: str) -> int:
+    """ספור כמה שאלות יש בתגובה של הבוט"""
+    question_marks = reply.count('?')
+    question_words = ['איך', 'מה', 'איפה', 'מתי', 'למה', 'מי', 'כמה', 'איזה', 'האם']
+    
+    # ספור שאלות לפי מילות שאלה
+    words = reply.split()
+    question_word_count = sum(1 for word in words if any(q_word in word for q_word in question_words))
+    
+    # החזר את המקסימום בין סימני שאלה למילות שאלה
+    return max(question_marks, question_word_count)
+
+def should_transfer_to_advisor(user_id: str) -> bool:
+    """בדוק אם צריך להעביר ליועץ אחרי 4 שאלות רלוונטיות"""
+    if user_id not in question_count:
+        return False
+    
+    return question_count[user_id] >= 4
+
 # בדיקה ושיכום שיחות ישנות שלא קיבלו סיכום
 # פונקציה זו עברה ל-whatsapp_webhook.py כדי לעבוד עם מערכת הטיימר האוטומטי
 def check_and_summarize_old_conversations():
@@ -372,6 +475,31 @@ def check_and_summarize_old_conversations():
     pass
 
 # פונקציית שיחה
+def is_greeting_message(message: str) -> bool:
+    """בדוק אם זו הודעת פתיחה עם שלום"""
+    message_lower = message.lower().strip()
+    greetings = ['שלום', 'היי', 'הי', 'שלום לך', 'שלום לכם', 'שלום עליכם', 'מה נשמע', 'מה קורה']
+    
+    # בדוק אם ההודעה מתחילה עם ברכה או מכילה רק ברכה
+    for greeting in greetings:
+        if message_lower.startswith(greeting) or message_lower == greeting:
+            return True
+    
+    return False
+
+def get_personalized_greeting_response(user_message: str) -> str:
+    """החזר תגובה מותאמת אישית להודעת פתיחה"""
+    message_lower = user_message.lower().strip()
+    
+    if 'שלום' in message_lower:
+        return "שלום! כאן נועה מ-Value+. אני כאן לעזור לך ליצור דף נחיתה מקצועי. איך קוראים לך?"
+    elif any(greeting in message_lower for greeting in ['היי', 'הי']):
+        return "היי! כאן נועה מ-Value+. נחמד להכיר. מה שם העסק שלך?"
+    elif 'מה נשמע' in message_lower or 'מה קורה' in message_lower:
+        return "הכל טוב תודה! אני נועה מ-Value+ ואני כאן לעזור לך ליצור דף נחיתה. בוא נכיר - איך קוראים לך?"
+    else:
+        return "היי! כאן נועה מ-Value+. אני כאן לעזור לך ליצור דף נחיתה מושלם. איך אפשר לקרוא לך?"
+
 def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     # בדיקת שיחות ישנות נעשית אוטומטית ב-whatsapp_webhook.py
     # כל 30 דקות ושעה
@@ -384,9 +512,31 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
             "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
         )
     
-    # אם אין שיחה קיימת – צור חדשה
-    if user_id not in conversations:
-        conversations[user_id] = [{"role": "system", "content": system_prompt}]
+    # בדוק אם צריך להמשיך שיחה קיימת או להתחיל חדשה
+    is_new_conversation = user_id not in conversations
+    
+    if is_new_conversation:
+        # נסה להמשיך שיחה קיימת מהקובץ
+        if should_continue_existing_conversation(user_id):
+            # השיחה נטענה - תן הודעה שמתאימה להמשך השיחה
+            if is_greeting_message(user_message):
+                # אם הלקוח מתחיל עם שלום אבל יש שיחה קיימת
+                conversations[user_id].append({"role": "user", "content": user_message})
+                welcome_back_response = "שלום! נחמד לראות אותך שוב. בואו נמשיך מאיפה שעצרנו - איך אני יכולה לעזור לך עם דף הנחיתה?"
+                conversations[user_id].append({"role": "assistant", "content": welcome_back_response})
+                save_conversation_to_file(user_id)
+                return welcome_back_response
+        else:
+            # התחל שיחה חדשה
+            conversations[user_id] = [{"role": "system", "content": system_prompt}]
+            
+            # אם זו הודעת פתיחה עם שלום, החזר תגובה מותאמת אישית
+            if is_greeting_message(user_message):
+                personalized_response = get_personalized_greeting_response(user_message)
+                conversations[user_id].append({"role": "user", "content": user_message})
+                conversations[user_id].append({"role": "assistant", "content": personalized_response})
+                save_conversation_to_file(user_id)
+                return personalized_response
 
     # הוסף הודעת משתמש
     conversations[user_id].append({"role": "user", "content": user_message})
@@ -434,13 +584,29 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
             "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
         )
 
+    # בדוק אם צריך להעביר ליועץ אחרי 4 שאלות
+    if should_transfer_to_advisor(user_id):
+        return (
+            "מעולה! אספתי מספיק מידע כדי להתחיל לעבוד על הדף שלך.\n\n"
+            "🎯 אני מעביר אותך עכשיו ליועץ מטעמנו שיכין לך הצעה מותאמת אישית ויסביר לך בדיוק איך הדף יעבוד עבור העסק שלך.\n\n"
+            "היועץ שלנו יחזור אליך תוך מספר שעות. תודה על הסבלנות! 🙏"
+        )
+
     # שלח ל־GPT
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-5-chat-latest",
         messages=conversations[user_id]
     )
 
     reply = response.choices[0].message.content
+
+    # ספור שאלות בתגובה של הבוט ועדכן מונה
+    questions_in_reply = count_questions_in_reply(reply)
+    if questions_in_reply > 0:
+        if user_id not in question_count:
+            question_count[user_id] = 0
+        question_count[user_id] += questions_in_reply
+        print(f"🔢 ספרתי {questions_in_reply} שאלות עבור {user_id}. סה\"כ: {question_count[user_id]}")
 
     # הוסף תגובת הסוכן להיסטוריה
     conversations[user_id].append({"role": "assistant", "content": reply})
