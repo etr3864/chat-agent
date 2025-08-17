@@ -20,8 +20,9 @@ import threading
 import schedule
 
 # OpenAI TTS מודל מתקדם
-# gpt-4o-mini-tts הוא המודל העדכני ביותר להמרת טקסט לדיבור
-# קולות זמינים: alloy, coral, fable, onyx, nova, coral
+# tts-1-hd הוא המודל החדש ביותר להמרת טקסט לדיבור עם איכות גבוהה
+# קולות זמינים: alloy, echo, fable, onyx, nova, shimmer
+# קול SHIMMER: אנושי ושקול עם מבטא טבעי - מומלץ לעברית
 # איכות קול גבוהה יותר וזמני תגובה קצרים
 
 # טען משתני סביבה
@@ -785,13 +786,13 @@ def transcribe_voice_message(file_url):
         return None
 
 def enhance_text_for_voice(text):
-    """שפר את הטקסט לתגובה קולית עם טון שמח ואנושי"""
+    """שפר את הטקסט לתגובה קולית עם טון אנושי ושקול עם מבטא ישראלי"""
     try:
-        print("😊 משפר טקסט לתגובה קולית עם טון שמח...")
+        print("🎤 משפר טקסט לתגובה קולית עם טון אנושי ושקול במבטא ישראלי...")
         
-        # אם הטקסט ריק, החזר ברירת מחדל שמחה
+        # אם הטקסט ריק, החזר ברירת מחדל אנושית ושקולה
         if not text or not text.strip():
-            return "היי! אני כאן לעזור לך! 😊"
+            return "שלום, אני כאן לעזור לך. איך אני יכולה לסייע?"
         
         # הוסף רגשות ותוספות לטקסט כדי להפוך אותו לשמח יותר
         enhanced_text = text
@@ -821,35 +822,35 @@ def enhance_text_for_voice(text):
             elif enhanced_text.startswith(f"{old} "):
                 enhanced_text = enhanced_text.replace(f"{old} ", f"{new} ", 1)
         
-        # הוסף צחוק והטיות בקול בהתאם למשפט
+        # הוסף ביטויים אנושיים ושקולים בהתאם למשפט
         if any(word in enhanced_text.lower() for word in ["מצחיק", "הומור", "בדיחה", "צחוק", "מעניין"]):
-            enhanced_text = enhanced_text + " הה הה! 😄"
+            enhanced_text = enhanced_text + " זה באמת מעניין."
         elif any(word in enhanced_text.lower() for word in ["מעולה", "נהדר", "פנטסטי", "אחלה"]):
-            enhanced_text = enhanced_text + " ממש כיף! 😊"
+            enhanced_text = enhanced_text + " זה נשמע טוב."
         elif any(word in enhanced_text.lower() for word in ["בוא נראה", "אולי", "יכול להיות"]):
-            enhanced_text = enhanced_text.replace("בוא נראה", "בוא נראה... אהה!")
-            enhanced_text = enhanced_text.replace("אולי", "אולי... מעניין!")
-            enhanced_text = enhanced_text.replace("יכול להיות", "יכול להיות... נכון!")
+            enhanced_text = enhanced_text.replace("בוא נראה", "בוא נראה...")
+            enhanced_text = enhanced_text.replace("אולי", "אולי...")
+            enhanced_text = enhanced_text.replace("יכול להיות", "יכול להיות...")
             
-        # הוסף הדגשות קוליות (מילים שיגרמו לקול להישמע יותר אנושי)
+        # הוסף הדגשות קוליות למבטא ישראלי אנושי ושקול
         voice_enhancements = [
-            ("!", "!"),  # שמור קיימים
-            ("?", "?"),  # שמור קיימים
+            ("!", "."),  # החלף קריאות בנקודות לטון שקול יותר
+            ("?", "?"),  # שמור שאלות
             (".", ". "),  # הוסף רווח קטן לנשימה
-            ("כמובן", "כמו-בן"),  # הדגשה
-            ("בהחלט", "בה-חלט"),  # הדגשה
-            ("מעולה", "מע-ו-לה!"),  # הדגשה שמחה
-            ("נהדר", "נה-דר!"),  # הדגשה שמחה
-            ("וואו", "וו-או!"),  # הדגשה מרגשת
-            ("אמת", "א-מת!"),  # הדגשה
-            ("בטח", "בט-ח!"),  # הדגשה
-            ("ברור", "ברו-ור!"),  # הדגשה
-            ("מאוד", "מא-וד"),  # הדגשה
-            ("ממש", "מ-מש"),  # הדגשה
-            ("טוב", "טו-וב"),  # הדגשה קלה
-            ("יפה", "יפ-ה!"),  # הדגשה שמחה
-            ("נחמד", "נח-מד!"),  # הדגשה
-            ("מגניב", "מג-ניב!"),  # הדגשה צעירה
+            ("כמובן", "כמובן"),  # שמור טבעי
+            ("בהחלט", "בהחלט"),  # שמור טבעי
+            ("מעולה", "מעולה"),  # שמור טבעי
+            ("נהדר", "נהדר"),  # שמור טבעי
+            ("וואו", "וואו"),  # שמור טבעי
+            ("אמת", "אמת"),  # שמור טבעי
+            ("בטח", "בטח"),  # שמור טבעי
+            ("ברור", "ברור"),  # שמור טבעי
+            ("מאוד", "מאוד"),  # שמור טבעי
+            ("ממש", "ממש"),  # שמור טבעי
+            ("טוב", "טוב"),  # שמור טבעי
+            ("יפה", "יפה"),  # שמור טבעי
+            ("נחמד", "נחמד"),  # שמור טבעי
+            ("מגניב", "מגניב"),  # שמור טבעי
         ]
         
         for old, new in voice_enhancements:
@@ -873,30 +874,30 @@ def enhance_text_for_voice(text):
                 if filler[0] in enhanced_text:
                     enhanced_text = enhanced_text.replace(filler[0], filler[1], 1)
         
-        # הוסף קריאות עידוד לפי הקשר
+        # הוסף ביטויים תומכים לפי הקשר
         if any(word in enhanced_text.lower() for word in ["תעזור", "עזרה", "בעיה", "קושי"]):
-            enhanced_text = enhanced_text + " אני כאן בשבילך! 💪"
+            enhanced_text = enhanced_text + " אני כאן לעזור לך."
         elif any(word in enhanced_text.lower() for word in ["תודה", "מעולה", "נהדר"]):
-            enhanced_text = enhanced_text + " זה הכיף שלי! 🎉"
+            enhanced_text = enhanced_text + " אני שמחה לעזור."
         
-        # וודא שהטקסט נגמר בצורה חיובית
-        if not enhanced_text.endswith(("!", "?", "😊", "🙂", "😄", "💪", "🎉")):
+        # וודא שהטקסט נגמר בצורה טבעית ושקולה
+        if not enhanced_text.endswith((".", "?", "...")):
             if "?" in enhanced_text[-10:]:
                 pass  # זו שאלה, תשאר ככה
             else:
-                enhanced_text = enhanced_text + "!"
+                enhanced_text = enhanced_text + "."
         
-        print(f"✨ טקסט משופר לקול שמח: {enhanced_text[:100]}...")
+        print(f"✨ טקסט משופר לקול אנושי ושקול: {enhanced_text[:100]}...")
         return enhanced_text
         
     except Exception as e:
         print(f"⚠️ שגיאה בשיפור טקסט: {e}")
         return text  # החזר את הטקסט המקורי במקרה של שגיאה
 
-def create_tts_audio_coral(text, voice="nova"):
-    """צור אודיו באמצעות OpenAI TTS עם קול שמח ואנושי - מחזיר bytes של MP3"""
+def create_tts_audio_coral(text, voice="shimmer"):
+    """צור אודיו באמצעות OpenAI TTS עם קול SHIMMER אנושי ושקול עם מבטא ישראלי - מחזיר bytes של MP3"""
     try:
-        print("🎵 מתחיל יצירת אודיו עם OpenAI TTS (קול שמח ואנושי)...")
+        print("🎵 מתחיל יצירת אודיו עם OpenAI TTS (קול SHIMMER אנושי ושקול)...")
 
         # בדוק שהטקסט לא ריק
         if not text or not text.strip():
@@ -912,7 +913,7 @@ def create_tts_audio_coral(text, voice="nova"):
             enhanced_text = enhanced_text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {original_length} -> {len(enhanced_text)} תווים")
 
-        print(f"🎵 יוצר קול עבור: {enhanced_text[:100]}... (OpenAI)")
+        print(f"🎵 יוצר קול עבור: {enhanced_text[:100]}... (OpenAI SHIMMER)")
         print(f"📊 אורך הטקסט המשופר: {len(enhanced_text)} תווים")
 
         # השתמש ב-OpenAI TTS עם הזרמה לקובץ זמני ואז קריאה כ-bytes
@@ -923,14 +924,13 @@ def create_tts_audio_coral(text, voice="nova"):
             temp_path = tmp.name
             tmp.close()
 
-            # שימוש בלקוח OpenAI עם קולות מתאימים:
-            # nova - קול נשי צעיר ואנרגטי (מומלץ לטון שמח)
-            # alloy - קול נייטרלי ובהיר
-            # echo - קול גברי נעים
-            print(f"🎤 משתמש בקול {voice} לתגובה שמחה ואנושית")
+            # שימוש בלקוח OpenAI עם קול SHIMMER:
+            # shimmer - קול נשי אנושי ושקול עם מבטא טבעי
+            # tts-1-hd - המודל החדש ביותר עם איכות גבוהה יותר
+            print(f"🎤 משתמש בקול {voice} (SHIMMER) לתגובה אנושית ושקולה עם מבטא ישראלי")
             with client.audio.speech.with_streaming_response.create(
-                model="tts-1",
-                voice=voice,  # nova הוא קול נשי שמח ואנושי
+                model="tts-1-hd",  # המודל החדש ביותר עם איכות גבוהה
+                voice=voice,  # shimmer הוא קול נשי אנושי ושקול
                 input=enhanced_text
             ) as response:
                 response.stream_to_file(temp_path)
@@ -1871,11 +1871,11 @@ def handle_voice_message(payload, sender):
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
         
-        # 4. צור תגובה קולית עם OpenAI TTS קול nova (שמח ואנושי)
-        print("🎵 יוצר תגובה קולית שמחה ואנושית עם קול nova...")
+        # 4. צור תגובה קולית עם OpenAI TTS קול SHIMMER (אנושי ושקול עם מבטא ישראלי)
+        print("🎵 יוצר תגובה קולית אנושית ושקולה עם קול SHIMMER...")
         audio_bytes = None
         try:
-            audio_bytes = create_tts_audio_coral(reply)
+            audio_bytes = create_tts_audio_coral(reply, voice="shimmer")
         except Exception as e:
             print(f"❌ שגיאה ביצירת אודיו: {e}")
             import traceback
