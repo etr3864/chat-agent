@@ -1800,17 +1800,13 @@ def whatsapp_webhook():
         reply = chat_with_gpt(message, user_id=sender)
         print(f"💬 תשובת GPT: {reply}")
         
-        # בדוק אם יש תגובה לשלוח (אם המשתמש הגיע למגבלה, reply יהיה None)
-        if reply is not None:
-            # חישוב עיכוב חכם לפני שליחת תשובה
-            delay = calculate_smart_delay(len(message), "text")
-            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה...")
-            time.sleep(delay)
-            
-            # שלח תשובת טקסט רגילה
-            send_whatsapp_message(sender, reply)
-        else:
-            print(f"🚫 לא שולח תגובה למשתמש {sender} - הגיע למגבלה")
+        # חישוב עיכוב חכם לפי אורך ההודעה
+        delay = calculate_smart_delay(len(message), "text")
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה...")
+        time.sleep(delay)
+        
+        # שלח תשובת טקסט רגילה
+        send_whatsapp_message(sender, reply)
         
         return "OK", 200
 
@@ -1870,17 +1866,22 @@ def handle_voice_message(payload, sender):
         reply = chat_with_gpt(transcribed_text, user_id=sender)
         print(f"💬 תשובת GPT: {reply}")
         
-        # בדוק אם יש תגובה לשלוח (אם המשתמש הגיע למגבלה, reply יהיה None)
-        if reply is not None:
-            # חישוב עיכוב חכם לפני שליחת טקסט
-            delay = calculate_smart_delay(len(reply), "text")
-            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
-            time.sleep(delay)
-            send_whatsapp_message(sender, reply)
-            
-            print("✅ תגובה נשלחה בטקסט עבור הודעה קולית")
-        else:
-            print(f"🚫 לא שולח תגובה קולית למשתמש {sender} - הגיע למגבלה")
+        # חישוב עיכוב חכם לפי אורך ההודעה הקולית
+        delay = calculate_smart_delay(len(transcribed_text), "audio")
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
+        time.sleep(delay)
+        
+        # 4. שלח תגובה בטקסט (כרגע לא יוצר אודיו אבל שומר את כל החיבור לעתיד)
+        print("📝 שולח תגובה בטקסט עבור הודעה קולית (התמלול נשמר)...")
+        print(f"🎤 התמלול שנשמר: {transcribed_text}")
+        
+        # חישוב עיכוב חכם לפני שליחת טקסט
+        delay = calculate_smart_delay(len(reply), "text")
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
+        time.sleep(delay)
+        send_whatsapp_message(sender, reply)
+        
+        print("✅ תגובה נשלחה בטקסט עבור הודעה קולית")
         
         return "OK", 200
         
@@ -1994,17 +1995,13 @@ def handle_image_message(payload, sender):
         reply = chat_with_gpt(message_to_process, user_id=sender)
         print(f"💬 תשובת GPT: {reply}")
         
-        # בדוק אם יש תגובה לשלוח (אם המשתמש הגיע למגבלה, reply יהיה None)
-        if reply is not None:
-            # חישוב עיכוב חכם לפני שליחת תשובה
-            delay = calculate_smart_delay(len(message_to_process), "image")
-            print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה לתמונה...")
-            time.sleep(delay)
-            
-            # שלח תשובת טקסט רגילה
-            send_whatsapp_message(sender, reply)
-        else:
-            print(f"🚫 לא שולח תגובה לתמונה למשתמש {sender} - הגיע למגבלה")
+        # חישוב עיכוב חכם לפי אורך ההודעה וסוג התמונה
+        delay = calculate_smart_delay(len(message_to_process), "image")
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה לתמונה...")
+        time.sleep(delay)
+        
+        # שלח תשובת טקסט רגילה
+        send_whatsapp_message(sender, reply)
         
         return "OK", 200
         
@@ -2605,59 +2602,15 @@ def test_ultramsg_api_parameters():
     except Exception as e:
         print(f"❌ שגיאה בבדיקת הפרמטרים: {e}")
 
-def check_mongodb_status():
-    """בדוק את מצב החיבור ל-MongoDB"""
-    try:
-        from mongodb_manager import mongodb_manager
-        if mongodb_manager.is_connected():
-            print("✅ MongoDB מחובר ופעיל")
-            return True
-        else:
-            print("❌ MongoDB לא מחובר - משתמש ב-JSON")
-            return False
-    except Exception as e:
-        print(f"❌ שגיאה בבדיקת MongoDB: {e}")
-        return False
-
-@app.route("/mongodb_status")
-def mongodb_status():
-    """בדוק מצב MongoDB דרך API"""
-    try:
-        from mongodb_manager import mongodb_manager
-        
-        status = {
-            "mongodb_connected": mongodb_manager.is_connected(),
-            "mongodb_uri_configured": bool(os.getenv("MONGODB_URI")),
-            "mongodb_database": os.getenv("MONGODB_DATABASE", "chatbot_db"),
-            "mongodb_collection": os.getenv("MONGODB_COLLECTION", "conversation_summaries"),
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        if mongodb_manager.is_connected():
-            # נסה לקבל סטטיסטיקות
-            try:
-                stats = mongodb_manager.get_statistics()
-                status["statistics"] = stats
-            except Exception as e:
-                status["statistics_error"] = str(e)
-        
-        return jsonify(status), 200
-        
-    except Exception as e:
-        return jsonify({"error": str(e), "mongodb_connected": False}), 500
-
 if __name__ == '__main__':
-    # בדוק מצב MongoDB בעת ההפעלה
-    print("🔍 בודק מצב MongoDB...")
-    check_mongodb_status()
+    # בדוק את הפורמט הנכון של UltraMsg API
+    test_ultramsg_audio_format()
+    test_ultramsg_api_format()
+    test_ultramsg_api_parameters()
     
     # הפעל את מערכת הסיכום האוטומטי
     start_auto_summary_thread()
     
-    # בדוק את הפורמט הנכון של UltraMsg API
-    test_ultramsg_audio_format()
-    test_ultramsg_api_format()
-    
-    # הפעל את השרת
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 מפעיל שרת על פורט {port}")
+    app.run(host='0.0.0.0', port=port, debug=True)

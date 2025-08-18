@@ -510,18 +510,7 @@ def is_greeting_message(message: str) -> bool:
     
     return False
 
-def get_personalized_greeting_response(user_message: str) -> str:
-    """החזר תגובה מותאמת אישית להודעת פתיחה"""
-    message_lower = user_message.lower().strip()
-    
-    if 'שלום' in message_lower:
-        return "שלום! כאן נועה מ-Value+. אני כאן לעזור לך ליצור דף נחיתה מקצועי. איך קוראים לך?"
-    elif any(greeting in message_lower for greeting in ['היי', 'הי']):
-        return "היי! כאן נועה מ-Value+. נחמד להכיר. מה שם העסק שלך?"
-    elif 'מה נשמע' in message_lower or 'מה קורה' in message_lower:
-        return "הכל טוב תודה! אני נועה מ-Value+ ואני כאן לעזור לך ליצור דף נחיתה. בוא נכיר - איך קוראים לך?"
-    else:
-        return "היי! כאן נועה מ-Value+. אני כאן לעזור לך ליצור דף נחיתה מושלם. איך אפשר לקרוא לך?"
+
 
 def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     # בדיקת שיחות ישנות נעשית אוטומטית ב-whatsapp_webhook.py
@@ -577,13 +566,19 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
             # התחל שיחה חדשה
             conversations[user_id] = [{"role": "system", "content": system_prompt}]
             
-            # אם זו הודעת פתיחה עם שלום, החזר תגובה מותאמת אישית
-            if is_greeting_message(user_message):
-                personalized_response = get_personalized_greeting_response(user_message)
-                conversations[user_id].append({"role": "user", "content": user_message})
-                conversations[user_id].append({"role": "assistant", "content": personalized_response})
-                save_conversation_to_file(user_id)
-                return personalized_response
+            # בשיחה חדשה, תמיד שלח את ההודעה הראשונה ל-GPT לתגובה מותאמת
+            conversations[user_id].append({"role": "user", "content": user_message})
+            
+            # שלח ל-GPT לקבלת תגובה מותאמת אישית להודעה הראשונה
+            response = client.chat.completions.create(
+                model="gpt-5-chat-latest",
+                messages=conversations[user_id]
+            )
+            
+            personalized_response = response.choices[0].message.content
+            conversations[user_id].append({"role": "assistant", "content": personalized_response})
+            save_conversation_to_file(user_id)
+            return personalized_response
 
     # הוסף הודעת משתמש
     conversations[user_id].append({"role": "user", "content": user_message})
