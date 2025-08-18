@@ -67,8 +67,27 @@ class ConversationSummaries:
         
         if self.mongodb_available:
             print("✅ משתמש ב-MongoDB לשמירת סיכומים")
+            # נסה לשמור סיכום בדיקה
+            try:
+                test_summary = {
+                    "phone_number": "test_connection",
+                    "customer_name": "בדיקת חיבור",
+                    "summary": "בדיקת חיבור למונגו DB",
+                    "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+                }
+                mongodb_manager.save_summary("test_connection", test_summary)
+                # מחק את הבדיקה
+                mongodb_manager.delete_summary("test_connection")
+                print("✅ MongoDB פועל תקין - בדיקת כתיבה/מחיקה הצליחה")
+            except Exception as e:
+                print(f"⚠️ בעיה ב-MongoDB: {e}")
+                self.mongodb_available = False
         else:
             print("📄 משתמש בקבצי JSON לשמירת סיכומים")
+            if not MONGODB_AVAILABLE:
+                print("💡 כדי להשתמש ב-MongoDB, הוסף MONGODB_URI למשתני הסביבה")
+            elif not mongodb_manager.is_connected():
+                print("💡 בדוק את החיבור ל-MongoDB")
     
     def load_summaries(self):
         """טען סיכומים קיימים"""

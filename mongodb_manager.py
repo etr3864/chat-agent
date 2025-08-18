@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-ניהול MongoDB עבור סיכומי שיחה
+ניהול MongoDB עבור סיכומי שיחה - גרסה משופרת עם בדיקות
 """
 
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, DuplicateKeyError
 from bson import ObjectId
 from dotenv import load_dotenv
 
@@ -22,22 +22,49 @@ class MongoDBManager:
         self.client = None
         self.db = None
         self.collection = None
+        self.connection_tested = False
         self.connect()
     
     def connect(self):
-        """התחבר ל-MongoDB"""
+        """התחבר ל-MongoDB עם בדיקות מקיפות"""
         try:
-            # נסה לקבל את כתובת ה-MongoDB ממשתנה סביבה
-            mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
+            # בדוק אם משתני הסביבה קיימים
+            mongo_uri = os.getenv("MONGODB_URI")
             database_name = os.getenv("MONGODB_DATABASE", "chatbot_db")
             collection_name = os.getenv("MONGODB_COLLECTION", "conversation_summaries")
             
-            print(f"🔗 מתחבר ל-MongoDB: {mongo_uri}")
-            self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            print("🔍 בודק הגדרות MongoDB...")
+            print(f"📊 MONGODB_URI: {'✅ מוגדר' if mongo_uri else '❌ לא מוגדר'}")
+            print(f"📊 Database: {database_name}")
+            print(f"📊 Collection: {collection_name}")
             
-            # בדוק חיבור
-            self.client.admin.command('ping')
-            print("✅ חיבור ל-MongoDB הצליח")
+            if not mongo_uri:
+                print("⚠️ MONGODB_URI לא מוגדר במשתני הסביבה")
+                print("⚠️ המערכת תמשיך לעבוד עם קבצי JSON")
+                print("💡 להגדרת MongoDB, הוסף MONGODB_URI למשתני הסביבה")
+                print("💡 דוגמה: MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/")
+                self._set_disconnected()
+                return
+            
+            # הסתר סיסמה בלוג
+            safe_uri = self._mask_password(mongo_uri)
+            print(f"🔗 מתחבר ל-MongoDB: {safe_uri}")
+            
+            # הגדרות חיבור משופרות
+            self.client = MongoClient(
+                mongo_uri, 
+                serverSelectionTimeoutMS=15000,  # 15 שניות
+                connectTimeoutMS=15000,
+                socketTimeoutMS=15000,
+                retryWrites=True,
+                maxPoolSize=10,
+                minPoolSize=1
+            )
+            
+            # בדוק חיבור עם פרטים
+            print("🔄 בודק חיבור למונגו DB...")
+            ping_result = self.client.admin.command('ping')
+            print(f"✅ חיבור ל-MongoDB הצליח! Ping: {ping_result}")
             
             self.db = self.client[database_name]
             self.collection = self.db[collection_name]
@@ -45,74 +72,204 @@ class MongoDBManager:
             # צור אינדקסים לשיפור ביצועים
             self._create_indexes()
             
+            # בדיקת כתיבה/קריאה
+            self._test_connection()
+            
+            print("🎉 MongoDB מוכן לשימוש!")
+            
         except (ConnectionFailure, ServerSelectionTimeoutError) as e:
             print(f"❌ שגיאה בהתחברות ל-MongoDB: {e}")
             print("⚠️ המערכת תמשיך לעבוד עם קבצי JSON")
-            self.client = None
-            self.db = None
-            self.collection = None
+            print("💡 בדוק את MONGODB_URI במשתני הסביבה")
+            print("💡 וודא שהשרת פועל ונגיש")
+            self._set_disconnected()
+        except Exception as e:
+            print(f"❌ שגיאה כללית בחיבור ל-MongoDB: {e}")
+            print("⚠️ המערכת תמשיך לעבוד עם קבצי JSON")
+            self._set_disconnected()
+    
+    def _mask_password(self, uri: str) -> str:
+        """הסתר סיסמה ב-URI לצורך הלוג"""
+        try:
+            if "://" in uri and "@" in uri:
+                protocol, rest = uri.split("://", 1)
+                if "@" in rest:
+                    credentials, host = rest.split("@", 1)
+                    if ":" in credentials:
+                        user, password = credentials.split(":", 1)
+                        return f"{protocol}://{user}:***@{host}"
+            return uri[:30] + "..."
+        except:
+            return uri[:30] + "..."
+    
+    def _set_disconnected(self):
+        """הגדר מצב לא מחובר"""
+        self.client = None
+        self.db = None
+        self.collection = None
+        self.connection_tested = False
+    
+    def _test_connection(self):
+        """בדוק שניתן לכתוב ולקרוא מהמונגו"""
+        try:
+            print("🧪 מבצע בדיקת כתיבה/קריאה...")
+            
+            test_doc = {
+                "phone_number": "test_connection_12345",
+                "customer_name": "בדיקת חיבור",
+                "summary": "בדיקת חיבור למונגו DB",
+                "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+                "test": True
+            }
+            
+            # נסה לשמור
+            result = self.collection.insert_one(test_doc)
+            print(f"✅ כתיבה הצליחה - ID: {result.inserted_id}")
+            
+            # נסה לקרוא
+            found_doc = self.collection.find_one({"_id": result.inserted_id})
+            if found_doc:
+                print("✅ קריאה הצליחה")
+            else:
+                print("⚠️ בעיה בקריאה")
+                return False
+            
+            # מחק את המסמך לניקיון
+            self.collection.delete_one({"_id": result.inserted_id})
+            print("✅ מחיקה הצליחה")
+            
+            self.connection_tested = True
+            print("🎯 בדיקת MongoDB הושלמה בהצלחה!")
+            return True
+            
+        except Exception as e:
+            print(f"❌ שגיאה בבדיקת החיבור: {e}")
+            self.connection_tested = False
+            return False
     
     def _create_indexes(self):
         """צור אינדקסים לשיפור ביצועים"""
         try:
-            # אינדקס על מספר טלפון
-            self.collection.create_index("phone_number", unique=True)
+            print("📊 יוצר אינדקסים...")
+            
+            # אינדקס על מספר טלפון (ייחודי)
+            try:
+                self.collection.create_index("phone_number", unique=True)
+                print("✅ אינדקס phone_number נוצר")
+            except Exception as e:
+                print(f"⚠️ אינדקס phone_number כבר קיים או שגיאה: {e}")
+            
             # אינדקס על שם לקוח
             self.collection.create_index("customer_name")
+            print("✅ אינדקס customer_name נוצר")
+            
             # אינדקס על תאריך
             self.collection.create_index("timestamp")
+            print("✅ אינדקס timestamp נוצר")
+            
             # אינדקס על שדה notified למניעת כפילויות
             self.collection.create_index("notified")
-            print("✅ אינדקסים נוצרו בהצלחה")
+            print("✅ אינדקס notified נוצר")
+            
+            print("✅ כל האינדקסים נוצרו בהצלחה")
+            
         except Exception as e:
             print(f"⚠️ שגיאה ביצירת אינדקסים: {e}")
     
+    def is_connected(self) -> bool:
+        """בדוק אם יש חיבור ל-MongoDB"""
+        if not (self.client and self.db and self.collection):
+            return False
+        
+        try:
+            # בדיקה מהירה
+            self.client.admin.command('ping')
+            return True
+        except:
+            return False
+    
+    def save_summary(self, user_id: str, summary_data: Dict) -> bool:
+        """שמור סיכום שיחה ב-MongoDB עם לוגים מפורטים"""
+        if not self.is_connected():
+            print("❌ אין חיבור ל-MongoDB - לא ניתן לשמור")
+            return False
+        
+        try:
+            print(f"💾 שומר סיכום ב-MongoDB עבור {user_id}...")
+            
+            # הוסף את מספר הטלפון למסמך
+            summary_data["phone_number"] = user_id
+            summary_data["updated_at"] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+            
+            # השתמש בפונקציה החדשה למניעת כפילויות
+            self.upsert_lead_with_notified(summary_data)
+            
+            print(f"✅ סיכום נשמר/עודכן ב-MongoDB עבור {user_id}")
+            print(f"📊 פרטי סיכום: {summary_data.get('customer_name', 'לא ידוע')} - {len(summary_data.get('summary', ''))} תווים")
+            return True
+            
+        except Exception as e:
+            print(f"❌ שגיאה בשמירת סיכום ב-MongoDB: {e}")
+            print(f"📄 הסיכום יישמר בקובץ JSON כגיבוי")
+            return False
+    
+    def get_connection_status(self) -> Dict:
+        """קבל מידע מפורט על מצב החיבור"""
+        status = {
+            "connected": self.is_connected(),
+            "client_exists": self.client is not None,
+            "db_exists": self.db is not None,
+            "collection_exists": self.collection is not None,
+            "connection_tested": self.connection_tested,
+            "mongodb_uri_configured": bool(os.getenv("MONGODB_URI")),
+            "database_name": os.getenv("MONGODB_DATABASE", "chatbot_db"),
+            "collection_name": os.getenv("MONGODB_COLLECTION", "conversation_summaries"),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        if self.is_connected():
+            try:
+                # נסה לקבל סטטיסטיקות
+                stats = self.get_statistics()
+                status["statistics"] = stats
+                
+                # בדוק כמה מסמכים יש
+                count = self.collection.count_documents({})
+                status["document_count"] = count
+                
+            except Exception as e:
+                status["statistics_error"] = str(e)
+        
+        return status
+
     def _now_iso_utc(self) -> str:
         """ISO 8601 UTC with Z (e.g. 2025-08-10T12:34:56.000Z)."""
-        # שימוש ב-%Y-%m-%dT%H:%M:%S.%fZ כדי לקבל 'Z' בסוף
         return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     
     def upsert_lead_with_notified(self, doc: Dict[str, Any]) -> None:
-        """
-        יוצר/מעדכן ליד לפי phone_number (או מזהה ייחודי אחר אם יש לכם),
-        שומר/מעדכן רק את השדות שמגיעים ב-doc (MongoDB לא מוחק שדות שלא הועברו ב-$set),
-        ומוודא שבמסמך חדש יתווסף notified=false.
-
-        - לא מוחק שדות קיימים (אנחנו משתמשים ב-$set רק למה שמגיע).
-        - במסמך חדש: $setOnInsert מוסיף notified=false ו-created_at.
-        - תמיד מעדכן updated_at ל-UTC ISO.
-        """
+        """יוצר/מעדכן ליד לפי phone_number"""
         if not isinstance(doc, dict):
             raise ValueError("doc must be a dict")
 
-        # מפתח לוגי לליד – החלף במקרה הצורך (למשל לפי _id אם אצלכם זה ה-key)
         key = doc.get("phone_number")
         if not key:
             raise ValueError("doc must include 'phone_number' to upsert")
 
         now = self._now_iso_utc()
+        set_fields: Dict[str, Any] = dict(doc)
+        set_fields["updated_at"] = now
 
-        # בונים את $set רק מהשדות שבאמת התקבלו ב-doc כדי לא 'לנגב' שדות אחרים
-        set_fields: Dict[str, Any] = dict(doc)  # העתקה רדודה של doc
-        set_fields["updated_at"] = now          # דואגים ש-UTC תמיד ישמר
-
-        # upsert לפי phone_number
         self.collection.update_one(
             {"phone_number": key},
             {
-                # במסמך חדש בלבד: מוסיפים notified=false ושעת יצירה
                 "$setOnInsert": {"notified": False, "created_at": now},
-                # במסמך קיים או חדש: מעדכנים רק את השדות שסיפקנו (לא מוחק אחרים)
                 "$set": set_fields
             },
             upsert=True
         )
     
     def mark_lead_notified(self, doc_id: Union[str, ObjectId]) -> None:
-        """
-        מסמן במסמך שקיימת הודעה/התראה שכבר יצאה: notified=true + notified_at.
-        לא משנה שדות אחרים.
-        """
+        """מסמן במסמך שקיימת הודעה/התראה שכבר יצאה"""
         oid = ObjectId(doc_id) if isinstance(doc_id, str) else doc_id
         self.collection.update_one(
             {"_id": oid},
@@ -135,34 +292,9 @@ class MongoDBManager:
             print(f"❌ שגיאה בקבלת לידים שלא נשלחה להם התראה: {e}")
             return []
     
-    def is_connected(self) -> bool:
-        """בדוק אם יש חיבור ל-MongoDB"""
-        return self.client is not None and self.db is not None
-    
-    def save_summary(self, user_id: str, summary_data: Dict) -> bool:
-        """שמור סיכום שיחה ב-MongoDB"""
-        if not self.is_connected():
-            print("❌ אין חיבור ל-MongoDB")
-            return False
-        
-        try:
-            # הוסף את מספר הטלפון למסמך
-            summary_data["phone_number"] = user_id
-            
-            # השתמש בפונקציה החדשה למניעת כפילויות
-            self.upsert_lead_with_notified(summary_data)
-            
-            print(f"✅ סיכום נשמר/עודכן ב-MongoDB עבור {user_id}")
-            return True
-            
-        except Exception as e:
-            print(f"❌ שגיאה בשמירת סיכום ב-MongoDB: {e}")
-            return False
-    
     def get_summary(self, user_id: str) -> Optional[Dict]:
         """קבל סיכום שיחה לפי מספר טלפון"""
         if not self.is_connected():
-            print("❌ אין חיבור ל-MongoDB")
             return None
         
         try:
@@ -175,7 +307,6 @@ class MongoDBManager:
     def get_all_summaries(self) -> List[Dict]:
         """קבל את כל סיכומי השיחה"""
         if not self.is_connected():
-            print("❌ אין חיבור ל-MongoDB")
             return []
         
         try:
@@ -188,11 +319,9 @@ class MongoDBManager:
     def search_by_phone(self, phone_number: str) -> List[Dict]:
         """חפש סיכומים לפי מספר טלפון"""
         if not self.is_connected():
-            print("❌ אין חיבור ל-MongoDB")
             return []
         
         try:
-            # חפש מספר טלפון חלקי
             summaries = list(self.collection.find(
                 {"phone_number": {"$regex": phone_number, "$options": "i"}},
                 {"_id": 0}
@@ -205,7 +334,6 @@ class MongoDBManager:
     def search_by_name(self, customer_name: str) -> List[Dict]:
         """חפש סיכומים לפי שם לקוח"""
         if not self.is_connected():
-            print("❌ אין חיבור ל-MongoDB")
             return []
         
         try:
@@ -221,7 +349,6 @@ class MongoDBManager:
     def get_statistics(self) -> Dict:
         """קבל סטטיסטיקות על הסיכומים"""
         if not self.is_connected():
-            print("❌ אין חיבור ל-MongoDB")
             return {}
         
         try:
@@ -261,7 +388,6 @@ class MongoDBManager:
     def delete_summary(self, user_id: str) -> bool:
         """מחק סיכום שיחה"""
         if not self.is_connected():
-            print("❌ אין חיבור ל-MongoDB")
             return False
         
         try:
@@ -283,4 +409,5 @@ class MongoDBManager:
             print("🔌 חיבור ל-MongoDB נסגר")
 
 # יצירת מופע גלובלי
+print("🚀 מאתחל MongoDB Manager...")
 mongodb_manager = MongoDBManager() 

@@ -27,6 +27,9 @@ question_count = {}
 # מעקב אחרי משתמשים שקיבלו הודעת העברה ליועץ
 transferred_to_advisor = {}
 
+# מעקב אחרי משתמשים שהגיעו למגבלת ההודעות וקיבלו הודעה על זה
+users_at_message_limit = {}
+
 # פונקציה לטעינת הפרומפט מקובץ חיצוני
 def load_system_prompt():
     """טען את הפרומפט מקובץ חיצוני"""
@@ -176,12 +179,9 @@ def should_continue_existing_conversation(user_id: str) -> bool:
                 current_time = time.time()
                 hours_since_update = (current_time - file_time) / 3600
                 
-                if hours_since_update < 24:  # פחות מ-24 שעות
-                    print(f"🔄 ממשיך שיחה קיימת: {user_id} (עודכנה לפני {hours_since_update:.1f} שעות)")
-                    return True
-                else:
-                    print(f"⏰ שיחה ישנה מדי: {user_id} ({hours_since_update:.1f} שעות) - מתחיל שיחה חדשה")
-                    return False
+                # הבוט יזכור שיחות לנצח - ללא הגבלת זמן
+                print(f"🔄 ממשיך שיחה קיימת: {user_id} (עודכנה לפני {hours_since_update:.1f} שעות)")
+                return True
         except Exception as e:
             print(f"⚠️ שגיאה בבדיקת זמן קובץ: {e}")
     
@@ -300,7 +300,7 @@ def is_user_at_limit(user_id: str) -> bool:
     
     # ספור רק הודעות משתמש וסוכן (לא system)
     user_assistant_messages = [m for m in conversations[user_id] if m["role"] in ["user", "assistant"]]
-    return len(user_assistant_messages) >= 50
+    return len(user_assistant_messages) >= 100
 
 # בדיקה אם עבר זמן רב מההודעה האחרונה
 # פונקציה זו עברה ל-whatsapp_webhook.py
@@ -544,11 +544,20 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     
     # בדיקה אם לקוח הגיע למגבלה
     if is_user_at_limit(user_id):
-        return (
-            "🚫 הגעת למגבלת 50 הודעות בשיחה הזו.\n"
-            "לא תוכל לשלוח הודעות נוספות.\n"
-            "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
-        )
+        # בדוק אם המשתמש כבר קיבל הודעה על המגבלה
+        if user_id in users_at_message_limit:
+            # המשתמש כבר קיבל הודעה - לא נחזיר כלום (הבוט לא יענה)
+            print(f"🚫 משתמש {user_id} הגיע למגבלה וכבר קיבל הודעה - לא עונה")
+            return None  # לא נחזיר תגובה
+        else:
+            # זו הפעם הראשונה - נשלח הודעה ונסמן שהוא קיבל אותה
+            users_at_message_limit[user_id] = datetime.now()
+            print(f"🚫 משתמש {user_id} הגיע למגבלה - שולח הודעה יחידה")
+            return (
+                "🚫 הגעת למגבלת 100 הודעות בשיחה הזו.\n"
+                "אני מעביר אותך למענה אנושי שיוכל לעזור לך הלאה.\n"
+                "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
+            )
     
     # בדוק אם צריך להמשיך שיחה קיימת או להתחיל חדשה
     is_new_conversation = user_id not in conversations
@@ -612,13 +621,13 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
 
     # בדיקה אם עברנו את מגבלת ההודעות
     total_messages = len([m for m in conversations[user_id] if m["role"] in ["user", "assistant"]])
-    if total_messages >= 50:
+    if total_messages >= 100:
         summary = summarize_conversation(user_id)
         save_conversation_summary(user_id, summary)
         save_conversation_to_file(user_id)
         return (
-            "🚫 הגענו למגבלת 50 הודעות בשיחה הזו.\n"
-            "לא תוכל לשלוח הודעות נוספות.\n"
+            "🚫 הגענו למגבלת 100 הודעות בשיחה הזו.\n"
+            "אני מעביר אותך למענה אנושי שיוכל לעזור לך הלאה.\n"
             "מאפיין אתרים מטעמנו יחייג למספר שלך בקרוב"
         )
 
