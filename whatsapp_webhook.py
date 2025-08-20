@@ -18,6 +18,7 @@ import cloudinary.uploader
 import cloudinary.api
 import threading
 import schedule
+import hashlib
 
 # OpenAI TTS מודל מתקדם
 # tts-1-hd הוא המודל החדש ביותר להמרת טקסט לדיבור עם איכות גבוהה

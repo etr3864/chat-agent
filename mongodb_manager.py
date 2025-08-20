@@ -114,20 +114,25 @@ class MongoDBManager:
         try:
             print("🧪 מבצע בדיקת כתיבה/קריאה...")
             
+            test_key = "__test_connection__"
             test_doc = {
-                "phone_number": "test_connection_12345",
+                "phone_number": test_key,
                 "customer_name": "בדיקת חיבור",
                 "summary": "בדיקת חיבור למונגו DB",
                 "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z'),
                 "test": True
             }
             
-            # נסה לשמור
-            result = self.collection.insert_one(test_doc)
-            print(f"✅ כתיבה הצליחה - ID: {result.inserted_id}")
+            # כתיבה באמצעות upsert כדי למנוע DuplicateKeyError אם המסמך קיים
+            self.collection.update_one(
+                {"phone_number": test_key},
+                {"$set": test_doc, "$setOnInsert": {"created_at": self._now_iso_utc()}},
+                upsert=True
+            )
+            print("✅ כתיבה/עדכון (upsert) הצליחה")
             
             # נסה לקרוא
-            found_doc = self.collection.find_one({"_id": result.inserted_id})
+            found_doc = self.collection.find_one({"phone_number": test_key})
             if found_doc:
                 print("✅ קריאה הצליחה")
             else:
@@ -135,7 +140,7 @@ class MongoDBManager:
                 return False
             
             # מחק את המסמך לניקיון
-            self.collection.delete_one({"_id": result.inserted_id})
+            self.collection.delete_one({"phone_number": test_key})
             print("✅ מחיקה הצליחה")
             
             self.connection_tested = True

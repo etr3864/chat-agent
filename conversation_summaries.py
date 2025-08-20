@@ -63,6 +63,7 @@ class ConversationSummaries:
     def __init__(self, summaries_file="conversation_summaries.json"):
         self.summaries_file = summaries_file
         self.summaries = self.load_summaries()
+        # אל תינעל על מצב החיבור בזמן האתחול בלבד; בדוק דינמית בכל פעולה
         self.mongodb_available = MONGODB_AVAILABLE and mongodb_manager.is_connected()
         
         if self.mongodb_available:
@@ -141,9 +142,18 @@ class ConversationSummaries:
         self.summaries[user_id] = summary_data
         self.save_summaries()
         
-        # שמור ב-MongoDB אם זמין
-        if self.mongodb_available:
-            mongodb_manager.save_summary(user_id, summary_data)
+        # נסה לשמור ב-MongoDB דינמית בכל פעם (גם אם בתחילת חיי התהליך לא היה חיבור)
+        try:
+            if MONGODB_AVAILABLE and mongodb_manager.is_connected():
+                mongodb_manager.save_summary(user_id, summary_data)
+            else:
+                # נסה להתחבר מחדש אם לא מחובר
+                if MONGODB_AVAILABLE:
+                    mongodb_manager.connect()
+                    if mongodb_manager.is_connected():
+                        mongodb_manager.save_summary(user_id, summary_data)
+        except Exception as e:
+            print(f"⚠️ שמירה ל-MongoDB נכשלה, נשמר רק ב-JSON. שגיאה: {e}")
         
         print(f"✅ סיכום נשמר עבור {customer_name} ({user_id}) עם {image_count} תמונות")
     
