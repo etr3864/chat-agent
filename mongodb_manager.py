@@ -183,7 +183,8 @@ class MongoDBManager:
     
     def is_connected(self) -> bool:
         """בדוק אם יש חיבור ל-MongoDB"""
-        if not (self.client and self.db and self.collection):
+        # השוואה מפורשת ל-None כדי להימנע מ-Boolean evaluation על אובייקטי PyMongo
+        if self.client is None or self.db is None or self.collection is None:
             return False
         
         try:
@@ -409,7 +410,7 @@ class MongoDBManager:
     
     def close_connection(self):
         """סגור חיבור ל-MongoDB"""
-        if self.client:
+        if self.client is not None:
             self.client.close()
             print("🔌 חיבור ל-MongoDB נסגר")
 
