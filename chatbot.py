@@ -571,7 +571,7 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
             
             # שלח ל-GPT לקבלת תגובה מותאמת אישית להודעה הראשונה
             response = client.chat.completions.create(
-                model="gpt-5-chat-latest",
+                model="ft:gpt-3.5-turbo-0125:personal::C6mN6Aa1",
                 messages=conversations[user_id]
             )
             
@@ -644,7 +644,7 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
 
     # שלח ל־GPT
     response = client.chat.completions.create(
-        model="gpt-5-chat-latest",
+        model="ft:gpt-3.5-turbo-0125:personal::C6mN6Aa1",
         messages=conversations[user_id]
     )
 
