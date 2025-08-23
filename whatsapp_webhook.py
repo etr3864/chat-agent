@@ -709,6 +709,7 @@ def text_to_speech(text, language="he"):
         }
         body = {
             "text": text,
+            "model_id": ELEVEN_MODEL_ID,
             "voice_settings": {
                 "stability": 0.4,
                 "similarity_boost": 0.8,
@@ -1916,23 +1917,36 @@ def handle_voice_message(payload, sender):
         reply = chat_with_gpt(transcribed_text, user_id=sender)
         print(f"💬 תשובת GPT: {reply}")
         
-        # חישוב עיכוב חכם לפי אורך ההודעה הקולית
+        # חישוב עיכוב חכם לפני יצירת תגובת אודיו
         delay = calculate_smart_delay(len(transcribed_text), "audio")
         print(f"⏱️ ממתין {delay:.2f} שניות לפני יצירת תגובה קולית...")
         time.sleep(delay)
-        
-        # 4. שלח תגובה בטקסט (כרגע לא יוצר אודיו אבל שומר את כל החיבור לעתיד)
-        print("📝 שולח תגובה בטקסט עבור הודעה קולית (התמלול נשמר)...")
-        print(f"🎤 התמלול שנשמר: {transcribed_text}")
-        
-        # חישוב עיכוב חכם לפני שליחת טקסט
-        delay = calculate_smart_delay(len(reply), "text")
-        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה בטקסט...")
-        time.sleep(delay)
+
+        # 4. צור אודיו מתשובת GPT באמצעות ElevenLabs V3 ושלח דרך Cloudinary
+        print("🎵 יוצר אודיו מתשובת GPT באמצעות ElevenLabs V3...")
+        tts_audio = text_to_speech(reply, language="he")
+        if tts_audio and len(tts_audio) > 1000:
+            if CLOUDINARY_AVAILABLE:
+                print("☁️ מעלה את האודיו שנוצר ל-Cloudinary...")
+                cloud_url = upload_audio_to_cloudinary(tts_audio, "reply.mp3")
+                if cloud_url:
+                    print("📤 שולח את קישור ה-Cloudinary כהודעת אודיו...")
+                    sent = send_audio_via_ultramsg_url(sender, cloud_url, caption="")
+                    if sent:
+                        print("✅ הודעת אודיו נשלחה בהצלחה (Cloudinary URL)")
+                        return "OK", 200
+                    else:
+                        print("⚠️ שליחת האודיו נכשלה, חוזר לטקסט")
+                else:
+                    print("⚠️ העלאה ל-Cloudinary נכשלה, חוזר לטקסט")
+            else:
+                print("⚠️ Cloudinary לא זמין, חוזר לטקסט")
+        else:
+            print("⚠️ יצירת אודיו נכשלה או קובץ קטן מדי, חוזר לטקסט")
+
+        # אם הגענו לכאן, הייתה בעיה ביצירת/שליחת אודיו – נחזור לטקסט
+        print("📝 שולח תשובה בטקסט כגיבוי...")
         send_whatsapp_message(sender, reply)
-        
-        print("✅ תגובה נשלחה בטקסט עבור הודעה קולית")
-        
         return "OK", 200
         
     except Exception as e:
