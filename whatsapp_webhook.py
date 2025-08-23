@@ -59,6 +59,9 @@ bot_active_status = {}
 # מילון לשמירת זמני הודעות אחרונות לכל משתמש
 last_message_times = {}
 
+# סט לזיהוי משתמשים שקיבלו הודעת התראה כאשר MongoDB לא זמין (מניעת כפילויות)
+notified_users = set()
+
 # מנגנון צבירת הודעות טקסט לפי משתמש (debounce)
 message_buffer = {}
 buffer_timers = {}
@@ -225,6 +228,74 @@ def check_and_summarize_old_conversations():
         import traceback
         traceback.print_exc()
 
+def check_and_notify_inactive_conversations():
+    """בדוק חוסר פעילות של שעה: בצע סיכום (בנוסף למנגנון הקיים) ושלח הודעת התראה"""
+    try:
+        from chatbot import conversations, summarize_conversation, save_conversation_summary, save_conversation_to_file
+        from conversation_summaries import summaries_manager
+        try:
+            from mongodb_manager import mongodb_manager
+        except Exception:
+            mongodb_manager = None
+
+        current_time = datetime.now()
+        notified_text = "העברתי את הפרטים שלך למאפיין אתרים מטעמינו, הוא יחזור אלייך בשעות הקרובות לתחילת עבודה!"
+
+        if not conversations:
+            return
+
+        for user_id, conversation in conversations.items():
+            try:
+                # חובה שיהיה לנו זמן הודעה אחרונה כדי למדוד חוסר פעילות
+                if user_id not in last_message_times:
+                    continue
+
+                time_diff = current_time - last_message_times[user_id]
+                if time_diff.total_seconds() < 3600:  # פחות משעה
+                    continue
+
+                # ודא שיש לפחות הודעת משתמש אחת
+                user_messages = [m for m in conversation if m.get("role") == "user"]
+                if len(user_messages) == 0:
+                    continue
+
+                # סכם שיחה אם עדיין אין סיכום
+                existing_summary = summaries_manager.get_summary(user_id)
+                if not existing_summary:
+                    print(f"🔄 מבצע סיכום חוסר פעילות (60דק): {user_id}")
+                    summary = summarize_conversation(user_id)
+                    save_conversation_summary(user_id, summary)
+                    save_conversation_to_file(user_id)
+
+                # שליחת הודעת התראה פעם אחת בלבד
+                already_notified = False
+                if mongodb_manager and mongodb_manager.is_connected():
+                    try:
+                        doc = mongodb_manager.get_summary(user_id)
+                        if doc and doc.get("notified") is True:
+                            already_notified = True
+                        if not already_notified:
+                            send_whatsapp_message(user_id, notified_text)
+                            # סמן כ-notified במסד
+                            if doc and doc.get("_id"):
+                                mongodb_manager.mark_lead_notified(doc["_id"])
+                    except Exception as e:
+                        print(f"⚠️ שגיאה בסימון notified במונגו עבור {user_id}: {e}")
+                else:
+                    if user_id in notified_users:
+                        already_notified = True
+                    if not already_notified:
+                        send_whatsapp_message(user_id, notified_text)
+                        notified_users.add(user_id)
+
+            except Exception as e:
+                print(f"⚠️ שגיאה בבדיקת חוסר פעילות עבור {user_id}: {e}")
+                continue
+    except Exception as e:
+        print(f"❌ שגיאה בפונקציית חוסר פעילות: {e}")
+        import traceback
+        traceback.print_exc()
+
 def run_auto_summary_scheduler():
     """הפעל את מערכת הסיכום האוטומטי"""
     try:
@@ -235,13 +306,17 @@ def run_auto_summary_scheduler():
         
         # בדוק שיחות ישנות כל 30 דקות
         schedule.every(30).minutes.do(check_and_summarize_old_conversations)
+
+        # בדוק חוסר פעילות של שעה (בדיקה כל 5 דקות)
+        schedule.every(5).minutes.do(check_and_notify_inactive_conversations)
         
         print("✅ מערכת סיכום אוטומטי הופעלה")
         print("   - בדיקה כל 10 דקות")
         print("   - בדיקה כל 30 דקות")
         
-        # הרץ בדיקה מיד בהפעלה
+        # הרץ בדיקות מיד בהפעלה
         check_and_summarize_old_conversations()
+        check_and_notify_inactive_conversations()
         
         while True:
             try:
@@ -263,6 +338,11 @@ def run_auto_summary_scheduler():
 def start_auto_summary_thread():
     """הפעל את מערכת הסיכום האוטומטי בthread נפרד"""
     try:
+        # הגנה מפני הפעלה כפולה
+        if hasattr(threading, "_auto_summary_started") and threading._auto_summary_started:
+            print("ℹ️ מערכת הסיכום האוטומטי כבר פועלת - מדלג על הפעלה נוספת")
+            return
+        threading._auto_summary_started = True
         print("🚀 מפעיל מערכת סיכום אוטומטי...")
         scheduler_thread = threading.Thread(target=run_auto_summary_scheduler, daemon=True)
         scheduler_thread.start()
@@ -281,6 +361,16 @@ def start_auto_summary_thread():
         print(f"❌ שגיאה בהפעלת thread של מערכת הסיכום: {e}")
         import traceback
         traceback.print_exc()
+
+# הפעלת המתזמן גם בסביבת שרת (למשל Render) כשמשתנה סביבה מופעל, עם מנגנון מניעה כפול
+try:
+    if os.environ.get("ENABLE_SCHEDULER", "0") == "1":
+        # נסה לא להפעיל פעמיים אם תרמיל רילואדר מפעיל שוב
+        if not hasattr(threading, "_auto_summary_started"):
+            threading._auto_summary_started = True
+            start_auto_summary_thread()
+except Exception as _e:
+    print(f"⚠️ לא ניתן להפעיל מתזמן אוטומטי בעת import: {_e}")
 
 def handle_admin_commands(message, sender):
     """טיפול בפקודות מנהל לשליטה בבוט"""
@@ -711,7 +801,7 @@ def text_to_speech(text, language="he"):
             "text": text,
             "model_id": ELEVEN_MODEL_ID,
             "voice_settings": {
-                "stability": 0.4,
+                "stability": 0.5,
                 "similarity_boost": 0.8,
                 "style": 0.5,
                 "use_speaker_boost": True,
