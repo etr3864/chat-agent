@@ -1928,16 +1928,8 @@ def whatsapp_webhook():
             is_audio = False
         
         if is_audio:
-            print("🎤 הודעת קול – נכנסת ל-buffer")
-            caption = payload.get("caption", "")
-            update_last_message_time(sender)
-            check_for_auto_summary_by_message_count(sender)
-            if not is_bot_active(sender):
-                print(f"🤖 בוט לא פעיל עבור {sender}, דולג על צבירה")
-                return "OK", 200
-            desc = "[🔊 קול]" + (f" {caption}" if caption else "")
-            buffer_text_message(sender, desc)
-            return "OK", 200
+            print("🎤 מטפל בהודעה קולית...")
+            return handle_voice_message(payload, sender)
 
         # בדוק מסמכים/קבצים
         is_document = False
