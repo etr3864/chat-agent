@@ -1845,8 +1845,52 @@ def whatsapp_webhook():
                     break
         
         if is_image:
-            print("🖼️ מטפל בתמונה...")
-            return handle_image_message(payload, sender)
+            print("🖼️ זוהתה תמונה – נכנסת ל-buffer במקום עיבוד מיידי")
+            caption = payload.get("caption", "")
+            # עדכן זמן הודעה אחרונה וסיכומים
+            update_last_message_time(sender)
+            check_for_auto_summary_by_message_count(sender)
+            # ודא שהבוט פעיל
+            if not is_bot_active(sender):
+                print(f"🤖 בוט לא פעיל עבור {sender}, דולג על צבירה")
+                return "OK", 200
+            desc = "[📷 תמונה]" + (f" {caption}" if caption else "")
+            buffer_text_message(sender, desc)
+            return "OK", 200
+
+        # בדוק וידאו
+        is_video = False
+        if message_type == "video":
+            is_video = True
+            print("🎥 זוהה וידאו לפי type='video'")
+        elif payload.get("mimetype", "").lower().startswith("video/"):
+            is_video = True
+            print(f"🎥 זוהה וידאו לפי mimetype: {payload.get('mimetype', '')}")
+        elif payload.get("media"):
+            media_url = payload.get("media", "").lower()
+            if any(media_url.endswith(ext) for ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]):
+                is_video = True
+                print("🎥 זוהה וידאו לפי סיומת קובץ ב-media URL")
+            elif any(term in media_url for term in ["video", "vid"]):
+                is_video = True
+                print("🎥 זוהה וידאו לפי מילות מפתח ב-media URL")
+        elif payload.get("body") and payload.get("body").startswith("http"):
+            body_url = payload.get("body", "").lower()
+            if any(body_url.endswith(ext) for ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]):
+                is_video = True
+                print("🎥 זוהה וידאו לפי סיומת קובץ ב-body URL")
+
+        if is_video:
+            print("🎥 הודעת וידאו – נכנסת ל-buffer")
+            caption = payload.get("caption", "")
+            update_last_message_time(sender)
+            check_for_auto_summary_by_message_count(sender)
+            if not is_bot_active(sender):
+                print(f"🤖 בוט לא פעיל עבור {sender}, דולג על צבירה")
+                return "OK", 200
+            desc = "[🎥 וידאו]" + (f" {caption}" if caption else "")
+            buffer_text_message(sender, desc)
+            return "OK", 200
             
         # בדוק הודעות קוליות
         is_audio = False
@@ -1884,8 +1928,55 @@ def whatsapp_webhook():
             is_audio = False
         
         if is_audio:
-            print("🎤 מטפל בהודעה קולית...")
-            return handle_voice_message(payload, sender)
+            print("🎤 הודעת קול – נכנסת ל-buffer")
+            caption = payload.get("caption", "")
+            update_last_message_time(sender)
+            check_for_auto_summary_by_message_count(sender)
+            if not is_bot_active(sender):
+                print(f"🤖 בוט לא פעיל עבור {sender}, דולג על צבירה")
+                return "OK", 200
+            desc = "[🔊 קול]" + (f" {caption}" if caption else "")
+            buffer_text_message(sender, desc)
+            return "OK", 200
+
+        # בדוק מסמכים/קבצים
+        is_document = False
+        filename_hint = payload.get("filename", "")
+        if message_type in ["document", "file"]:
+            is_document = True
+            print("📄 זוהה מסמך לפי type")
+        elif payload.get("mimetype", "").lower().startswith("application/"):
+            is_document = True
+            print(f"📄 זוהה מסמך לפי mimetype: {payload.get('mimetype', '')}")
+        else:
+            url_candidate = payload.get("media", "") or (payload.get("body", "") if payload.get("body", "").startswith("http") else "")
+            lower_url = url_candidate.lower()
+            if lower_url:
+                if any(lower_url.endswith(ext) for ext in [
+                    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+                    ".txt", ".csv", ".zip", ".rar"
+                ]):
+                    is_document = True
+                    print("📄 זוהה מסמך לפי סיומת קובץ ב-URL")
+                # נסה להפיק שם קובץ לרמז
+                try:
+                    filename_hint = url_candidate.split("?")[0].split("/")[-1] or filename_hint
+                except Exception:
+                    pass
+
+        if is_document:
+            print("📄 הודעת קובץ/מסמך – נכנסת ל-buffer")
+            caption = payload.get("caption", "")
+            update_last_message_time(sender)
+            check_for_auto_summary_by_message_count(sender)
+            if not is_bot_active(sender):
+                print(f"🤖 בוט לא פעיל עבור {sender}, דולג על צבירה")
+                return "OK", 200
+            label = "[📄 קובץ]"
+            details = caption or filename_hint
+            desc = label + (f" {details}" if details else "")
+            buffer_text_message(sender, desc)
+            return "OK", 200
             
         # הודעת טקסט רגילה
         message = payload.get("body", "")
