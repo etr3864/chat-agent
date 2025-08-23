@@ -59,6 +59,65 @@ bot_active_status = {}
 # מילון לשמירת זמני הודעות אחרונות לכל משתמש
 last_message_times = {}
 
+# מנגנון צבירת הודעות טקסט לפי משתמש (debounce)
+message_buffer = {}
+buffer_timers = {}
+buffer_lock = threading.Lock()
+BUFFER_WINDOW_SEC = 6  # חלון צבירה בשניות (5–8 שניות לפי הדרישה)
+
+def flush_buffer(sender):
+    """שליחת הודעה מרוכזת עבור משתמש לאחר חלון צבירה"""
+    try:
+        with buffer_lock:
+            messages = message_buffer.get(sender, [])
+            # נקה את הטיימר והמאגרים עבור השולח
+            timer = buffer_timers.pop(sender, None)
+            message_buffer[sender] = []
+
+        if not messages:
+            return
+
+        combined_text = "\n".join(messages).strip()
+        if not combined_text:
+            return
+
+        # ודא שהבוט עדיין פעיל למשתמש
+        if not is_bot_active(sender):
+            return
+
+        # עיבוד GPT על בסיס כל ההודעות יחד
+        print(f"🤖 מעבד הודעה מרוכזת עם GPT עבור {sender}...")
+        reply = chat_with_gpt(combined_text, user_id=sender)
+        print(f"💬 תשובת GPT (מרוכזת): {reply}")
+
+        # עיכוב חכם לפי אורך הקלט המרוכז
+        delay = calculate_smart_delay(len(combined_text), "text")
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה מרוכזת...")
+        time.sleep(delay)
+
+        send_whatsapp_message(sender, reply)
+    except Exception as e:
+        print(f"❌ שגיאה בשליחת תשובה מרוכזת: {e}")
+
+def buffer_text_message(sender, message):
+    """הוסף הודעת טקסט למאגר עבור המשתמש והפעל/אתחל טיימר צבירה"""
+    with buffer_lock:
+        if sender not in message_buffer:
+            message_buffer[sender] = []
+        message_buffer[sender].append(message)
+
+        # בטל טיימר קיים אם יש והפעל חדש
+        existing = buffer_timers.get(sender)
+        if existing is not None:
+            try:
+                existing.cancel()
+            except Exception:
+                pass
+        t = threading.Timer(BUFFER_WINDOW_SEC, flush_buffer, args=(sender,))
+        buffer_timers[sender] = t
+        t.daemon = True
+        t.start()
+
 def is_bot_active(user_id):
     """בדוק אם הבוט פעיל למשתמש מסוים"""
     return bot_active_status.get(user_id, True)  # ברירת מחדל: פעיל
@@ -1796,19 +1855,9 @@ def whatsapp_webhook():
             print(f"🤖 בוט לא פעיל עבור {sender}, לא מעבד הודעה")
             return "OK", 200  # לא שולח תשובה, אבל מקבל את ההודעה
         
-        # הבוט פעיל - עבד את ההודעה
-        print(f"🤖 מעבד הודעה עם GPT...")
-        reply = chat_with_gpt(message, user_id=sender)
-        print(f"💬 תשובת GPT: {reply}")
-        
-        # חישוב עיכוב חכם לפי אורך ההודעה
-        delay = calculate_smart_delay(len(message), "text")
-        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה...")
-        time.sleep(delay)
-        
-        # שלח תשובת טקסט רגילה
-        send_whatsapp_message(sender, reply)
-        
+        # הבוט פעיל - צבור את ההודעה וגשש טיימר לתגובה מרוכזת
+        print(f"🧲 צובר הודעת טקסט למאגָר עבור {sender}")
+        buffer_text_message(sender, message)
         return "OK", 200
 
     except Exception as e:
