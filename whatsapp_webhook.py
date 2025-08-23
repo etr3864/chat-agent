@@ -526,7 +526,7 @@ except KeyError as e:
 
 # הגדרות קבועות ל-ElevenLabs TTS
 ELEVEN_VOICE_ID = "cgSgspJ2msm6clMCkdW9"  # Jessica
-ELEVEN_MODEL_ID = "eleven_multilingual_v3"
+ELEVEN_MODEL_ID = "eleven_v3"
 
 # התחברות ל־OpenAI עבור תמלול ו-TTS
 client = OpenAI(api_key=OPENAI_API_KEY)
