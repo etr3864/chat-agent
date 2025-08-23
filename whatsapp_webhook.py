@@ -168,6 +168,7 @@ def check_and_summarize_old_conversations():
         from chatbot import conversations, summarize_conversation, save_conversation_summary, save_conversation_to_file
         
         current_time = datetime.now()
+        notified_text_30 = "מאפיין דפי נחיתה יחזור אלייך בזמן הקרוב! תודה על שיתוף הפעולה."
         summarized_count = 0
         
         # בדוק אם יש שיחות
@@ -179,7 +180,7 @@ def check_and_summarize_old_conversations():
             try:
                 # בדוק אם יש שיחה עם לפחות 2 הודעות מצד הלקוח
                 user_messages = [m for m in conversation if m["role"] == "user"]
-                if len(user_messages) >= 2:
+                if len(user_messages) >= 3:
                     # בדוק אם עבר זמן רב מההודעה האחרונה (יותר מ-30 דקות)
                     if user_id in last_message_times:
                         time_diff = current_time - last_message_times[user_id]
@@ -193,6 +194,11 @@ def check_and_summarize_old_conversations():
                                     summary = summarize_conversation(user_id)
                                     save_conversation_summary(user_id, summary)
                                     save_conversation_to_file(user_id)
+                                    # שלח הודעת התראה לאחר הסיכום (30 דקות)
+                                    try:
+                                        send_whatsapp_message(user_id, notified_text_30)
+                                    except Exception as e:
+                                        print(f"⚠️ שגיאה בשליחת הודעת 30 דק' עבור {user_id}: {e}")
                                     summarized_count += 1
                                     print(f"✅ סיכום אוטומטי הושלם עבור: {user_id}")
                             except Exception as e:
