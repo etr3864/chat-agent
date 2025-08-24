@@ -134,15 +134,17 @@ def process_voice_message_async(payload, sender):
     try:
         audio_url = payload.get("media", "") or payload.get("body", "") or payload.get("url", "")
         if not audio_url:
-            buffer_text_message(sender, "[🎤 קול] לא נמצא קובץ קול")
+            # אל תוסיף placeholder קול לבאפר – שמור את השיחה נקייה
+            buffer_text_message(sender, "לא נמצא קובץ קול תקין בהודעה האחרונה")
             return
         transcribed_text = transcribe_voice_message(audio_url)
         if transcribed_text:
-            buffer_text_message(sender, f"[🎤 קול] {transcribed_text}")
+            # אל תוסיף את התמלול כטקסט "גולמי". הוסף ניסוח מנחה ל-GPT.
+            buffer_text_message(sender, f"המשתמש אמר בהקלטה: \"{transcribed_text}\". ענה לו ישירות בקצרה.")
         else:
-            buffer_text_message(sender, "[🎤 קול] לא הצלחתי לתמלל את ההקלטה")
+            buffer_text_message(sender, "לא הצלחתי לתמלל את ההקלטה. תוכל לנסות שוב או לכתוב בטקסט?")
     except Exception:
-        buffer_text_message(sender, "[🎤 קול] אירעה שגיאה בתמלול")
+        buffer_text_message(sender, "אירעה שגיאה בתמלול ההקלטה")
 
 def flush_buffer(sender):
     """שליחת הודעה מרוכזת עבור משתמש לאחר חלון צבירה"""
@@ -164,6 +166,19 @@ def flush_buffer(sender):
         # ודא שהבוט עדיין פעיל למשתמש
         if not is_bot_active(sender):
             return
+
+        # טרנספורמציה קלה: הפוך שורות קוליות להנחיה ברורה ל-GPT
+        processed_lines = []
+        for line in messages:
+            if line.startswith("המשתמש אמר בהקלטה:"):
+                processed_lines.append(line)
+            elif line.startswith("[🎤 קול]"):
+                # נקה רעש של placeholder ישנים אם נשארו
+                continue
+            else:
+                processed_lines.append(line)
+
+        combined_text = "\n".join(processed_lines).strip()
 
         # עיבוד GPT על בסיס כל ההודעות יחד
         print(f"🤖 מעבד הודעה מרוכזת עם GPT עבור {sender}...")
@@ -836,14 +851,12 @@ def format_for_tts(raw_text: str) -> str:
     משתמש בפיסוק ברור, הוספת הפסקות, ותגיות הגייה בסיסיות.
     """
     system_prompt = """
-    אתה מחולל תסריטי קריינות מותאמים ל-TTS של ElevenLabs.
-    קלט: תשובה לטקסט חופשי מהמשתמש.
-    פלט: טקסט מוכן ל-TTS עם הכללים הבאים:
-    1. חלק משפטים ארוכים למשפטים קצרים וברורים.
-    2. הפלט חייב להיות טקסט עברי נקי בלבד, ללא תגיות/פקודות באנגלית או בסוגריים משולשים.
-    3. סמן הפסקות טבעיות באמצעות פיסוק בלבד (פסיקים, נקודות, "...") – לא תגיות.
-    4. אל תוסיף הסברים או הערות – הפלט חייב להיות רק הטקסט להקראה.
-    5. שמור על אורך סביר (עד 2–3 משפטים).
+    אתה מחולל טקסט קריינות ל-TTS של ElevenLabs.
+    כללים מחייבים לפלט:
+    - הפלט הוא תשובת העוזר בלבד, בעברית נקייה. לא לחזור על ניסוחי המשתמש ולא לצטט אותו.
+    - לא לכלול תגיות, פקודות או סוגריים מיוחדים. טקסט רגיל בלבד.
+    - חלק משפטים ארוכים לקצרים וברורים וסמן הפסקות עם פיסוק בלבד.
+    - שמור על 1–3 משפטים לכל היותר.
     """
     try:
         resp = client.chat.completions.create(
@@ -2022,7 +2035,7 @@ def whatsapp_webhook():
             is_audio = False
         
         if is_audio:
-            print("🎤 זוהתה הודעה קולית – מצרף לבאפר ושולח תשובה קולית אחת בחלון צבירה")
+            print("🎤 זוהתה הודעה קולית – מפעיל תמלול ברקע ושומר מצב תשובה אודיו")
             # עדכן זמן הודעה אחרונה וסיכום אוטומטי
             update_last_message_time(sender)
             check_for_auto_summary_by_message_count(sender)
@@ -2034,10 +2047,9 @@ def whatsapp_webhook():
                 print("⏭️ הודעת קול זו כבר טופלה – נמנע משליחה כפולה")
                 return "OK", 200
 
-            # צבירת אינדיקציה להודעת קול בבאפר וקביעת מצב תשובה = אודיו
+            # קבע מצב תשובה = אודיו (ללא הוספת placeholder מיותר לבאפר)
             with buffer_lock:
                 buffer_reply_mode[sender] = "audio"
-            buffer_text_message(sender, "[🎤 קול] הודעה קולית התקבלה")
 
             # תמלול ברקע כדי לא לחסום את ה-webhook ולהימנע מריטריים
             threading.Thread(target=process_voice_message_async, args=(payload, sender), daemon=True).start()
