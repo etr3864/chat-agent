@@ -91,6 +91,59 @@ buffer_timers = {}
 buffer_lock = threading.Lock()
 BUFFER_WINDOW_SEC = 15  # חלון צבירה בשניות
 
+# מצב מועדף לתשובה עבור מאגר ההודעות (טקסט/אודיו) לכל משתמש
+buffer_reply_mode = {}
+
+# דיהופליקציה גלובלית וחזקה לאירועי קול
+VOICE_DEDUP_CACHE = {}
+VOICE_DEDUP_TTL_SECONDS = int(os.environ.get("VOICE_DEDUP_TTL_SECONDS", "900"))
+VOICE_DEDUP_LOCK = threading.Lock()
+
+def build_voice_key(payload, audio_url, sender):
+    """בנה מפתח אידמפוטנטי יציב עבור הודעת קול"""
+    base = (
+        payload.get("wamid")
+        or payload.get("id")
+        or payload.get("message_id")
+        or payload.get("msgId")
+        or payload.get("key")
+        or ""
+    )
+    composite = f"{sender}|{base}|{audio_url or ''}"
+    return hashlib.sha1(composite.encode("utf-8")).hexdigest()
+
+def _is_duplicate_voice_event_strict(unique_key: str) -> bool:
+    try:
+        now_ts = time.time()
+        # ניקוי מפתחות שפגו תוקפן
+        expired = [k for k, ts in VOICE_DEDUP_CACHE.items() if now_ts - ts > VOICE_DEDUP_TTL_SECONDS]
+        for k in expired:
+            del VOICE_DEDUP_CACHE[k]
+        if not unique_key:
+            return False
+        with VOICE_DEDUP_LOCK:
+            if unique_key in VOICE_DEDUP_CACHE:
+                return True
+            VOICE_DEDUP_CACHE[unique_key] = now_ts
+        return False
+    except Exception:
+        return False
+
+def process_voice_message_async(payload, sender):
+    """עיבוד תמלול להודעת קול ברקע והוספה לבאפר"""
+    try:
+        audio_url = payload.get("media", "") or payload.get("body", "") or payload.get("url", "")
+        if not audio_url:
+            buffer_text_message(sender, "[🎤 קול] לא נמצא קובץ קול")
+            return
+        transcribed_text = transcribe_voice_message(audio_url)
+        if transcribed_text:
+            buffer_text_message(sender, f"[🎤 קול] {transcribed_text}")
+        else:
+            buffer_text_message(sender, "[🎤 קול] לא הצלחתי לתמלל את ההקלטה")
+    except Exception:
+        buffer_text_message(sender, "[🎤 קול] אירעה שגיאה בתמלול")
+
 def flush_buffer(sender):
     """שליחת הודעה מרוכזת עבור משתמש לאחר חלון צבירה"""
     try:
@@ -99,6 +152,7 @@ def flush_buffer(sender):
             # נקה את הטיימר והמאגרים עבור השולח
             timer = buffer_timers.pop(sender, None)
             message_buffer[sender] = []
+            reply_mode = buffer_reply_mode.pop(sender, None)
 
         if not messages:
             return
@@ -116,11 +170,31 @@ def flush_buffer(sender):
         reply = chat_with_gpt(combined_text, user_id=sender)
         print(f"💬 תשובת GPT (מרוכזת): {reply}")
 
-        # עיכוב חכם לפי אורך הקלט המרוכז
-        delay = calculate_smart_delay(len(combined_text), "text")
-        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה מרוכזת...")
+        # קבע מצב תשובה: אודיו אם התקבלה הודעת קול בחלון הצבירה
+        reply_type = "audio" if (reply_mode == "audio") else "text"
+        delay = calculate_smart_delay(len(combined_text), reply_type)
+        print(f"⏱️ ממתין {delay:.2f} שניות לפני שליחת תשובה מרוכזת ({reply_type})...")
         time.sleep(delay)
 
+        if reply_type == "audio":
+            # נסה ליצור אודיו ולשלוח; במקרה של כישלון חזור לטקסט
+            tts_audio = text_to_speech(reply, language="he")
+            if tts_audio and len(tts_audio) > 1000:
+                if CLOUDINARY_AVAILABLE:
+                    cloud_url = upload_audio_to_cloudinary(tts_audio, "reply.mp3")
+                    if cloud_url:
+                        sent = send_audio_via_ultramsg_url(sender, cloud_url, caption="")
+                        if sent:
+                            print("✅ תשובת אודיו מרוכזת נשלחה בהצלחה")
+                            return
+                        else:
+                            print("⚠️ שליחת האודיו נכשלה, חוזר לטקסט")
+                else:
+                    print("⚠️ Cloudinary לא זמין, חוזר לטקסט")
+            else:
+                print("⚠️ יצירת אודיו נכשלה או קובץ קטן מדי, חוזר לטקסט")
+
+        # ברירת מחדל או נפילה חזרה: שלח טקסט
         send_whatsapp_message(sender, reply)
     except Exception as e:
         print(f"❌ שגיאה בשליחת תשובה מרוכזת: {e}")
@@ -763,7 +837,7 @@ def format_for_tts(raw_text: str) -> str:
     """
     system_prompt = """
     אתה מחולל תסריטי קריינות מותאמים ל-TTS של ElevenLabs.
-    קלט: טקסט חופשי מהמשתמש/בוט.
+    קלט: תשובה לטקסט חופשי מהמשתמש.
     פלט: טקסט מוכן ל-TTS עם הכללים הבאים:
     1. חלק משפטים ארוכים למשפטים קצרים וברורים.
     2. הפלט חייב להיות טקסט עברי נקי בלבד, ללא תגיות/פקודות באנגלית או בסוגריים משולשים.
@@ -1948,8 +2022,26 @@ def whatsapp_webhook():
             is_audio = False
         
         if is_audio:
-            print("🎤 מטפל בהודעה קולית...")
-            return handle_voice_message(payload, sender)
+            print("🎤 זוהתה הודעה קולית – מצרף לבאפר ושולח תשובה קולית אחת בחלון צבירה")
+            # עדכן זמן הודעה אחרונה וסיכום אוטומטי
+            update_last_message_time(sender)
+            check_for_auto_summary_by_message_count(sender)
+
+            # דיהופליקציה חזקה על סמך מפתח יציב
+            audio_url = payload.get("media", "") or payload.get("body", "") or payload.get("url", "")
+            voice_key = build_voice_key(payload, audio_url, sender)
+            if _is_duplicate_voice_event_strict(voice_key):
+                print("⏭️ הודעת קול זו כבר טופלה – נמנע משליחה כפולה")
+                return "OK", 200
+
+            # צבירת אינדיקציה להודעת קול בבאפר וקביעת מצב תשובה = אודיו
+            with buffer_lock:
+                buffer_reply_mode[sender] = "audio"
+            buffer_text_message(sender, "[🎤 קול] הודעה קולית התקבלה")
+
+            # תמלול ברקע כדי לא לחסום את ה-webhook ולהימנע מריטריים
+            threading.Thread(target=process_voice_message_async, args=(payload, sender), daemon=True).start()
+            return "OK", 200
 
         # בדוק מסמכים/קבצים
         is_document = False

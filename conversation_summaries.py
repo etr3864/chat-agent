@@ -110,6 +110,29 @@ class ConversationSummaries:
         customer_name = extract_customer_name(user_id, conversations, pushname)
         customer_gender = detect_customer_gender(user_id, conversations)
         
+        # ספר הודעות משתמש עד כה (לצורך בקרת המשכיות שיחה)
+        user_message_count = len([m for m in conversations.get(user_id, []) if m.get("role") == "user"])
+
+        # חשב את מונה הסיכומים (summary_count):
+        # אם יש מסמך קיים במונגו – קח ממנו, אחרת קח מה-JSON; אם אין – התחל מ-1
+        summary_count = 1
+        try:
+            prev_count = 0
+            if MONGODB_AVAILABLE and mongodb_manager.is_connected():
+                try:
+                    existing_doc = mongodb_manager.get_summary(user_id)
+                except Exception:
+                    existing_doc = None
+                if existing_doc and isinstance(existing_doc, dict):
+                    prev_count = int(existing_doc.get("summary_count", 0) or 0)
+            else:
+                previous_json = self.summaries.get(user_id)
+                if previous_json:
+                    prev_count = int(previous_json.get("summary_count", 0) or 0)
+            summary_count = prev_count + 1
+        except Exception:
+            summary_count = 1
+
         # ספור תמונות בשיחה לפי תוכן ההודעות
         image_count = 0
         image_urls = []
@@ -135,7 +158,10 @@ class ConversationSummaries:
             "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z'),
             "total_messages": len([m for m in conversations.get(user_id, []) if m["role"] in ["user", "assistant"]]),
             "image_count": image_count,
-            "image_urls": image_urls
+            "image_urls": image_urls,
+            # שדות בקרה נוספים
+            "user_message_count": user_message_count,
+            "summary_count": summary_count
         }
         
         # שמור ב-JSON (גיבוי)

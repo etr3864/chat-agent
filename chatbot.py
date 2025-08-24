@@ -30,6 +30,9 @@ transferred_to_advisor = {}
 # מעקב אחרי משתמשים שהגיעו למגבלת ההודעות וקיבלו הודעה על זה
 users_at_message_limit = {}
 
+# בקרה על סיכומי שיחה (מניעת כפילויות והגבלה לסיכום נוסף לאחר המשך)
+summary_control = {}
+
 # פונקציה לטעינת הפרומפט מקובץ חיצוני
 def load_system_prompt():
     """טען את הפרומפט מקובץ חיצוני"""
@@ -91,6 +94,15 @@ def reload_system_prompt():
     system_prompt = load_system_prompt()
     print("✅ הפרומפט רוענן מהקובץ החיצוני")
     return system_prompt
+
+def ensure_system_prompt_for_user(user_id: str) -> None:
+    """ודא שהיסטוריית השיחה למשתמש מתחילה בהודעת system עם ה-agent prompt."""
+    if user_id not in conversations or not conversations[user_id]:
+        conversations[user_id] = [{"role": "system", "content": system_prompt}]
+        return
+    first_message = conversations[user_id][0]
+    if first_message.get("role") != "system":
+        conversations[user_id].insert(0, {"role": "system", "content": system_prompt})
 
 # יצירת תיקייה לשמירת שיחות
 def save_conversation_to_file(user_id: str):
@@ -240,18 +252,44 @@ def set_customer_pushname(user_id: str, pushname: str):
 
 # שמירת סיכום שיחה עם פרטי לקוח
 def save_conversation_summary(user_id: str, summary: str):
+    # בקרת כפילויות: הגבל סיכום לשיחה לפעם אחת, ועוד פעם אחת בלבד אם הייתה המשכיות מצד הלקוח
+    from conversation_summaries import summaries_manager, extract_customer_name, detect_customer_gender
+
+    # ספירת הודעות משתמש עדכנית
+    current_user_msg_count = len([m for m in conversations.get(user_id, []) if m.get("role") == "user"])
+
+    # אתחל/טען מצב עבור המשתמש
+    state = summary_control.get(user_id)
+    if state is None:
+        try:
+            existing = summaries_manager.get_summary(user_id)
+        except Exception:
+            existing = None
+        if existing:
+            existing_count = existing.get("summary_count", 1)
+            prev_user_count = existing.get("user_message_count", current_user_msg_count)
+            summary_control[user_id] = {"count": existing_count, "user_msg_count_at_last": prev_user_count}
+        else:
+            summary_control[user_id] = {"count": 0, "user_msg_count_at_last": 0}
+        state = summary_control[user_id]
+
+    # כללים: לא יותר מ-2 סיכומים. השני רק אם נוספו הודעות משתמש מאז הסיכום הקודם
+    if state.get("count", 0) >= 2:
+        print(f"⛔ דילוג על סיכום: כבר נשלחו 2 סיכומים עבור {user_id}")
+        return
+    if state.get("count", 0) == 1 and current_user_msg_count <= state.get("user_msg_count_at_last", 0):
+        print(f"⛔ דילוג על סיכום: אין המשך שיחה מאז הסיכום האחרון עבור {user_id}")
+        return
+
     # שמור בקובץ המקורי
     folder = "conversations"
     os.makedirs(folder, exist_ok=True)
-    
-    # ייבא הפונקציות מהמודול הנכון
-    from conversation_summaries import extract_customer_name, detect_customer_gender
-    
+
     # חלץ פרטי לקוח (כולל שם מ-UltraMsg)
     pushname = customer_pushnames.get(user_id, "")
     customer_name = extract_customer_name(user_id, conversations, pushname)
     customer_gender = detect_customer_gender(user_id, conversations)
-    
+
     # קרא את הקובץ הקיים אם יש
     filepath = os.path.join(folder, f"{user_id}.txt")
     existing_content = ""
@@ -263,7 +301,7 @@ def save_conversation_summary(user_id: str, summary: str):
             # אם יש בעיה עם הקידוד, ננסה קידוד אחר
             with open(filepath, "r", encoding="utf-8") as f:
                 existing_content = f.read()
-    
+
     # הוסף סיכום עם פרטי לקוח
     summary_section = f"""
 {'='*50}
@@ -279,19 +317,21 @@ def save_conversation_summary(user_id: str, summary: str):
 
 {'='*50}
 """
-    
+
     # שמור הכל לקובץ
     with open(filepath, "w", encoding="utf-8-sig") as f:
         f.write(existing_content + summary_section)
-    
-    # שמור במערכת הסיכומים החדשה
+
+    # שמור במערכת הסיכומים (תעד user_message_count ו-summary_count)
     try:
-        from conversation_summaries import summaries_manager
         summaries_manager.add_summary(user_id, summary, conversations, pushname)
-        print(f"✅ סיכום נשמר ב-JSON עבור {customer_name} ({user_id})")
+        # עדכן מצב בקרת סיכומים
+        summary_control[user_id]["count"] = state.get("count", 0) + 1
+        summary_control[user_id]["user_msg_count_at_last"] = current_user_msg_count
+        print(f"✅ סיכום נשמר עבור {customer_name} ({user_id})")
     except Exception as e:
-        print(f"⚠️ שגיאה בשמירת סיכום ל-JSON: {e}")
-        pass  # אם המערכת לא זמינה, נמשיך בלי
+        print(f"⚠️ שגיאה בשמירת סיכום: {e}")
+        return
 
 # בדיקה אם לקוח הגיע למגבלה
 def is_user_at_limit(user_id: str) -> bool:
@@ -515,6 +555,8 @@ def is_greeting_message(message: str) -> bool:
 def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     # בדיקת שיחות ישנות נעשית אוטומטית ב-whatsapp_webhook.py
     # כל 30 דקות ושעה
+    # ודא שפרומפט המערכת קיים בראש ההיסטוריה
+    ensure_system_prompt_for_user(user_id)
     
     # בדוק אם המשתמש הועבר ליועץ ורוצה להמשיך השיחה
     if user_id in transferred_to_advisor:
@@ -554,6 +596,7 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
     if is_new_conversation:
         # נסה להמשיך שיחה קיימת מהקובץ
         if should_continue_existing_conversation(user_id):
+            ensure_system_prompt_for_user(user_id)
             # השיחה נטענה - תן הודעה שמתאימה להמשך השיחה
             if is_greeting_message(user_message):
                 # אם הלקוח מתחיל עם שלום אבל יש שיחה קיימת
@@ -581,6 +624,7 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
             return personalized_response
 
     # הוסף הודעת משתמש
+    ensure_system_prompt_for_user(user_id)
     conversations[user_id].append({"role": "user", "content": user_message})
     
     # עדכון זמן הודעה אחרונה נעשה ב-whatsapp_webhook.py
