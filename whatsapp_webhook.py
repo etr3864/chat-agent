@@ -29,6 +29,29 @@ import hashlib
 # טען משתני סביבה
 load_dotenv()
 
+# --- session tracking in Mongo ---
+from pymongo import MongoClient
+
+_mclient = MongoClient(os.environ["MONGODB_URI"], serverSelectionTimeoutMS=10000)
+_mdb = _mclient[os.environ.get("MONGODB_DATABASE", "chatbot_db")]
+_sessions = _mdb["wa_sessions"]
+
+# 20 דקות (ניתן לשינוי דרך ENV)
+INACT_SEC = int(os.environ.get("INACTIVITY_SECONDS", "1200"))
+
+def touch_session_for_user(user_id: str):
+    """עדכון 'הודעת לקוח אחרונה' + מונה הודעות לקוח + יעד due_at"""
+    now_ms = int(time.time() * 1000)
+    _sessions.update_one(
+        {"session_id": user_id},
+        {
+            "$setOnInsert": {"status": "open"},
+            "$set": {"last_user_ts": now_ms, "due_at": now_ms + INACT_SEC * 1000},
+            "$inc": {"user_msg_count": 1}
+        },
+        upsert=True
+    )
+
 # הגדר את Cloudinary
 try:
     CLOUDINARY_CLOUD_NAME = os.environ["CLOUDINARY_CLOUD_NAME"]
@@ -134,6 +157,12 @@ def update_last_message_time(user_id):
     """עדכן זמן הודעה אחרונה למשתמש"""
     last_message_times[user_id] = datetime.now()
     print(f"⏰ זמן הודעה אחרונה עודכן עבור: {user_id}")
+    # עדכון סשן במונגו לצורך סיכומי שיחה אוטומטיים
+    try:
+        touch_session_for_user(user_id)
+    except Exception as _e:
+        # לא לחסום את הזרימה במקרה שמונגו לא זמין
+        pass
 
 def check_for_auto_summary_by_message_count(user_id):
     """בדוק אם צריך לבצע סיכום אוטומטי לפי מספר הודעות"""
@@ -160,79 +189,44 @@ def check_for_auto_summary_by_message_count(user_id):
         print(f"⚠️ שגיאה בבדיקת סיכום לפי מספר הודעות עבור {user_id}: {e}")
 
 def check_and_summarize_old_conversations():
-    """בדוק שיחות ישנות שלא קיבלו סיכום ובצע סיכום אוטומטי"""
-    try:
-        print("🔄 בודק שיחות ישנות לסיכום אוטומטי...")
-        
-        # ייבא את הפונקציות הנדרשות
-        from chatbot import conversations, summarize_conversation, save_conversation_summary, save_conversation_to_file
-        
-        current_time = datetime.now()
-        notified_text_30 = "מאפיין דפי נחיתה יחזור אלייך בזמן הקרוב! תודה על שיתוף הפעולה."
-        summarized_count = 0
-        
-        # בדוק אם יש שיחות
-        if not conversations:
-            print("ℹ️ אין שיחות לבדיקה")
-            return
-        
-        for user_id, conversation in conversations.items():
-            try:
-                # בדוק אם יש שיחה עם לפחות 2 הודעות מצד הלקוח
-                user_messages = [m for m in conversation if m["role"] == "user"]
-                if len(user_messages) >= 3:
-                    # בדוק אם עבר זמן רב מההודעה האחרונה (יותר מ-30 דקות)
-                    if user_id in last_message_times:
-                        time_diff = current_time - last_message_times[user_id]
-                        if time_diff.total_seconds() > 1800:  # 30 דקות
-                            # בדוק אם כבר יש סיכום בקובץ ה-JSON
-                            try:
-                                from conversation_summaries import summaries_manager
-                                existing_summary = summaries_manager.get_summary(user_id)
-                                if not existing_summary:
-                                    print(f"🔄 מבצע סיכום אוטומטי לשיחה ישנה: {user_id} (זמן)")
-                                    summary = summarize_conversation(user_id)
-                                    save_conversation_summary(user_id, summary)
-                                    save_conversation_to_file(user_id)
-                                    # שלח הודעת התראה לאחר הסיכום (30 דקות)
-                                    try:
-                                        send_whatsapp_message(user_id, notified_text_30)
-                                    except Exception as e:
-                                        print(f"⚠️ שגיאה בשליחת הודעת 30 דק' עבור {user_id}: {e}")
-                                    summarized_count += 1
-                                    print(f"✅ סיכום אוטומטי הושלם עבור: {user_id}")
-                            except Exception as e:
-                                print(f"⚠️ שגיאה בסיכום אוטומטי עבור {user_id}: {e}")
-                                continue
-                    else:
-                        # אם אין זמן אחרון, בדוק אם יש הרבה הודעות (6-8)
-                        if len(user_messages) >= 6:
-                            try:
-                                from conversation_summaries import summaries_manager
-                                existing_summary = summaries_manager.get_summary(user_id)
-                                if not existing_summary:
-                                    print(f"🔄 מבצע סיכום אוטומטי לשיחה עם {len(user_messages)} הודעות: {user_id}")
-                                    summary = summarize_conversation(user_id)
-                                    save_conversation_summary(user_id, summary)
-                                    save_conversation_to_file(user_id)
-                                    summarized_count += 1
-                                    print(f"✅ סיכום אוטומטי הושלם עבור: {user_id}")
-                            except Exception as e:
-                                print(f"⚠️ שגיאה בסיכום אוטומטי עבור {user_id}: {e}")
-                                continue
-            except Exception as e:
-                print(f"⚠️ שגיאה בבדיקת שיחה {user_id}: {e}")
-                continue
-        
-        if summarized_count > 0:
-            print(f"✅ סיכום אוטומטי הושלם עבור {summarized_count} שיחות")
-        else:
-            print("ℹ️ אין שיחות ישנות שדורשות סיכום")
-            
-    except Exception as e:
-        print(f"❌ שגיאה בבדיקת שיחות ישנות: {e}")
-        import traceback
-        traceback.print_exc()
+    """מסכם שיחות עם ≥3 הודעות לקוח ושקט ≥ INACT_SEC (ברירת מחדל 20 דק')."""
+    print("🔄 בודק שיחות ישנות (Mongo sessions)...", flush=True)
+    now_ms = int(time.time() * 1000)
+
+    # מועמדים: סטטוס open, לפחות 3 הודעות לקוח, עברו ≥ INACT_SEC מהודעת לקוח אחרונה
+    cursor = _sessions.find(
+        {
+            "status": "open",
+            "user_msg_count": {"$gte": 3},
+            "last_user_ts": {"$lte": now_ms - INACT_SEC * 1000}
+        },
+        {"session_id": 1},
+        limit=100
+    )
+
+    # ייבוא מאוחר כדי להימנע מתלות מעגלית
+    from chatbot import summarize_conversation, save_conversation_summary, save_conversation_to_file
+
+    summarized = 0
+    for s in cursor:
+        sid = s["session_id"]
+        try:
+            summary = summarize_conversation(sid)
+            save_conversation_summary(sid, summary)  # שומר גם למונגו דרך המנגנון שלך
+            save_conversation_to_file(sid)            # אם קיים אצלך
+
+            # סגור סשן שלא נסכם שוב
+            _sessions.update_one(
+                {"session_id": sid, "status": "open"},
+                {"$set": {"status": "closed", "closed_at": now_ms}}
+            )
+            summarized += 1
+            print(f"✅ סוכמה שיחה אוטומטית: {sid}", flush=True)
+        except Exception as e:
+            print(f"⚠️ כשל בסיכום {sid}: {e}", flush=True)
+
+    if summarized == 0:
+        print("ℹ️ אין שיחות בשלות לסיכום", flush=True)
 
 def check_and_notify_inactive_conversations():
     """בדוק חוסר פעילות של שעה: בצע סיכום (בנוסף למנגנון הקיים) ושלח הודעת התראה"""
@@ -303,43 +297,23 @@ def check_and_notify_inactive_conversations():
         traceback.print_exc()
 
 def run_auto_summary_scheduler():
-    """הפעל את מערכת הסיכום האוטומטי"""
-    try:
-        print("⏰ מפעיל מערכת סיכום אוטומטי...")
-        
-        # בדוק שיחות ישנות כל 10 דקות
-        schedule.every(10).minutes.do(check_and_summarize_old_conversations)
-        
-        # בדוק שיחות ישנות כל 30 דקות
-        schedule.every(30).minutes.do(check_and_summarize_old_conversations)
+    print("⏰ run_auto_summary_scheduler: starting…", flush=True)
 
-        # בדוק חוסר פעילות של שעה (בדיקה כל 5 דקות)
+    # תדירות גבוהה לזיהוי מהיר (אפשר 1 דקה אם רוצים)
+    schedule.every(2).minutes.do(check_and_summarize_old_conversations)
+
+    # שמור גם על בדיקת חוסר פעילות אם קיימת במערכת שלך
+    try:
         schedule.every(5).minutes.do(check_and_notify_inactive_conversations)
-        
-        print("✅ מערכת סיכום אוטומטי הופעלה")
-        print("   - בדיקה כל 10 דקות")
-        print("   - בדיקה כל 30 דקות")
-        
-        # הרץ בדיקות מיד בהפעלה
-        check_and_summarize_old_conversations()
-        check_and_notify_inactive_conversations()
-        
-        while True:
-            try:
-                schedule.run_pending()
-                time.sleep(60)  # בדוק כל דקה
-            except KeyboardInterrupt:
-                print("⏹️ מערכת הסיכום האוטומטי הופסקה")
-                break
-            except Exception as e:
-                print(f"⚠️ שגיאה במערכת הסיכום האוטומטי: {e}")
-                time.sleep(60)  # המתן דקה ונסה שוב
-                continue
-            
-    except Exception as e:
-        print(f"❌ שגיאה במערכת הסיכום האוטומטי: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        pass
+
+    # אם יש אצלך גם every(10).minutes / every(30).minutes – אפשר להשאיר
+
+    while True:
+        schedule.run_pending()
+        print("❤️ scheduler heartbeat", flush=True)
+        time.sleep(60)
 
 def start_auto_summary_thread():
     """הפעל את מערכת הסיכום האוטומטי בthread נפרד"""
@@ -782,6 +756,37 @@ def transcribe_audio(audio_data):
         traceback.print_exc()
         return None
 
+def format_for_tts(raw_text: str) -> str:
+    """
+    מעבד טקסט גולמי לטקסט מותאם ל-TTS של ElevenLabs.
+    משתמש בפיסוק ברור, הוספת הפסקות, ותגיות הגייה בסיסיות.
+    """
+    system_prompt = """
+    אתה מחולל תסריטי קריינות מותאמים ל-TTS של ElevenLabs.
+    קלט: טקסט חופשי מהמשתמש/בוט.
+    פלט: טקסט מוכן ל-TTS עם הכללים הבאים:
+    1. חלק משפטים ארוכים למשפטים קצרים וברורים.
+    2. הוסף <break time="0.5s" /> היכן שדרושה הפסקה טבעית.
+    3. אם יש שם/מותג קשה להיגוי, הוסף <phoneme alphabet="ipa" ph="...">המילה</phoneme>.
+    4. אל תוסיף הסברים או הערות – הפלט חייב להיות רק הטקסט להקראה.
+    5. שמור על אורך סביר (עד 2–3 משפטים).
+    """
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": raw_text}
+            ],
+            temperature=0.2,
+            max_tokens=600
+        )
+        content = resp.choices[0].message.content.strip() if resp and resp.choices else ""
+        return content or raw_text
+    except Exception as e:
+        print(f"⚠️ שגיאה ב-format_for_tts: {e}")
+        return raw_text
+
 def text_to_speech(text, language="he"):
     """המר טקסט לדיבור באמצעות ElevenLabs TTS (MP3 bytes)"""
     try:
@@ -794,6 +799,9 @@ def text_to_speech(text, language="he"):
         if len(text) > 4000:
             text = text[:4000] + "..."
             print(f"⚠️ טקסט קוצר ל-TTS: {len(text)} תווים")
+
+        # עצב את הטקסט במיוחד ל-TTS של ElevenLabs
+        text = format_for_tts(text)
 
         print(f"🎵 יוצר קול עבור: {text[:100]}... (ElevenLabs)")
 
