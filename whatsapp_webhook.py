@@ -89,7 +89,7 @@ notified_users = set()
 message_buffer = {}
 buffer_timers = {}
 buffer_lock = threading.Lock()
-BUFFER_WINDOW_SEC = 6  # חלון צבירה בשניות (5–8 שניות לפי הדרישה)
+BUFFER_WINDOW_SEC = 15  # חלון צבירה בשניות
 
 def flush_buffer(sender):
     """שליחת הודעה מרוכזת עבור משתמש לאחר חלון צבירה"""
@@ -766,8 +766,8 @@ def format_for_tts(raw_text: str) -> str:
     קלט: טקסט חופשי מהמשתמש/בוט.
     פלט: טקסט מוכן ל-TTS עם הכללים הבאים:
     1. חלק משפטים ארוכים למשפטים קצרים וברורים.
-    2. הוסף <break time="0.5s" /> היכן שדרושה הפסקה טבעית.
-    3. אם יש שם/מותג קשה להיגוי, הוסף <phoneme alphabet="ipa" ph="...">המילה</phoneme>.
+    2. הפלט חייב להיות טקסט עברי נקי בלבד, ללא תגיות/פקודות באנגלית או בסוגריים משולשים.
+    3. סמן הפסקות טבעיות באמצעות פיסוק בלבד (פסיקים, נקודות, "...") – לא תגיות.
     4. אל תוסיף הסברים או הערות – הפלט חייב להיות רק הטקסט להקראה.
     5. שמור על אורך סביר (עד 2–3 משפטים).
     """
@@ -782,6 +782,12 @@ def format_for_tts(raw_text: str) -> str:
             max_tokens=600
         )
         content = resp.choices[0].message.content.strip() if resp and resp.choices else ""
+        # סניטיזציה ביטחונית: הסר תגיות/פקודות אם הוחדרו בטעות
+        try:
+            import re
+            content = re.sub(r"<[^>]+>", "", content)
+        except Exception:
+            pass
         return content or raw_text
     except Exception as e:
         print(f"⚠️ שגיאה ב-format_for_tts: {e}")
@@ -2061,6 +2067,29 @@ def handle_voice_message(payload, sender):
         print(f"🔍 Debug - body: '{payload.get('body', '')}'")
         print(f"🔍 Debug - type: '{payload.get('type', '')}'")
         
+        # מנגנון דיהופליקציה גלובלי: ודא שלא תישלח יותר מהודעת קול אחת לכל הודעה נכנסת
+        try:
+            global VOICE_DEDUP_CACHE, VOICE_DEDUP_TTL_SECONDS
+        except NameError:
+            VOICE_DEDUP_CACHE = {}
+            VOICE_DEDUP_TTL_SECONDS = 900  # 15 דקות TTL
+        
+        def _is_duplicate_voice_event(unique_key: str) -> bool:
+            try:
+                now_ts = time.time()
+                # ניקוי מפתחות שפגו תוקפן
+                expired = [k for k, ts in VOICE_DEDUP_CACHE.items() if now_ts - ts > VOICE_DEDUP_TTL_SECONDS]
+                for k in expired:
+                    del VOICE_DEDUP_CACHE[k]
+                if not unique_key:
+                    return False
+                if unique_key in VOICE_DEDUP_CACHE:
+                    return True
+                VOICE_DEDUP_CACHE[unique_key] = now_ts
+                return False
+            except Exception:
+                return False
+        
         # קבל URL של קובץ הקול - בדוק מספר מקומות
         audio_url = payload.get("media", "") or payload.get("body", "") or payload.get("url", "")
         if not audio_url or not audio_url.strip():
@@ -2072,6 +2101,19 @@ def handle_voice_message(payload, sender):
             return "Invalid", 400
         
         print(f"🎤 קובץ קול זוהה: {audio_url}")
+        
+        # בנה מפתח ייחודי עבור ההודעה הקולית
+        voice_key = (
+            payload.get("id") or
+            payload.get("message_id") or
+            payload.get("wamid") or
+            payload.get("msgId") or
+            payload.get("key") or
+            audio_url
+        )
+        if _is_duplicate_voice_event(str(voice_key)):
+            print("⏭️ הודעת קול זו כבר טופלה – נמנע משליחה כפולה")
+            return "OK", 200
         
         # 1. תמלל את ההודעה הקולית באמצעות OpenAI Whisper
         print("🎤 מתחיל תמלול...")
