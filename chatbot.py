@@ -286,6 +286,28 @@ def set_customer_pushname(user_id: str, pushname: str):
 
 # שמירת סיכום שיחה עם פרטי לקוח
 def save_conversation_summary(user_id: str, summary: str):
+    # בדיקת טקסט החשוד כתשובת בוט ולא סיכום אמיתי
+    safe_summary_text = (summary or "").strip()
+    suspicious_reply_like = False
+    try:
+        suspicious_starts = ("היי", "סבבה", "מעולה")
+        if len(safe_summary_text) < 20:
+            suspicious_reply_like = True
+        elif safe_summary_text.startswith(suspicious_starts):
+            suspicious_reply_like = True
+        else:
+            # זיהוי אימוג'ים בסיסי לפי טווחי יוניקוד נפוצים
+            for _ch in safe_summary_text:
+                _code = ord(_ch)
+                if (0x1F300 <= _code <= 0x1FAFF) or (0x2600 <= _code <= 0x27BF):
+                    suspicious_reply_like = True
+                    break
+    except Exception:
+        pass
+    if suspicious_reply_like:
+        print("[save_conversation_summary] SKIP suspicious reply-like text")
+        return
+
     summary_data = _build_summary_document(user_id, summary)
     print(f"[save_conversation_summary] saving for {user_id}: {len(summary_data.get('summary',''))} chars")
 
@@ -380,6 +402,11 @@ def save_conversation_summary(user_id: str, summary: str):
         summary_control[user_id]["count"] = state.get("count", 0) + 1
         summary_control[user_id]["user_msg_count_at_last"] = current_user_msg_count
         print(f"✅ סיכום נשמר עבור {customer_name} ({user_id})")
+        # לוג הצלחה עם מספר התווים בסיכום
+        try:
+            print(f"[save_conversation_summary] saved OK ({len(summary_data.get('summary',''))} chars)")
+        except Exception:
+            print("[save_conversation_summary] saved OK")
     except Exception as e:
         print(f"⚠️ שגיאה בשמירת סיכום: {e}")
         return
