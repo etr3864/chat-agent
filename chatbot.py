@@ -95,6 +95,40 @@ def reload_system_prompt():
     print("✅ הפרומפט רוענן מהקובץ החיצוני")
     return system_prompt
 
+def _build_summary_document(user_id: str, summary_text: str) -> dict:
+    from datetime import datetime
+    try:
+        from conversation_summaries import extract_customer_name as _extract_customer_name, detect_customer_gender as _detect_customer_gender
+    except Exception:
+        # Fallbacks if helpers are not available for any reason
+        def _extract_customer_name(*_args, **_kwargs): return ""
+        def _detect_customer_gender(*_args, **_kwargs): return "לא ידוע"
+
+    msgs = conversations.get(user_id, [])
+    total_user_msgs = len([m for m in msgs if m.get("role") == "user"])
+    safe_summary = (summary_text or "").strip()
+
+    # נסה לקרוא לפי החתימות הקיימות בקובץ conversation_summaries.py
+    try:
+        pushname = customer_pushnames.get(user_id, "")
+        customer_name = _extract_customer_name(user_id, conversations, pushname)
+    except TypeError:
+        customer_name = _extract_customer_name(user_id)
+
+    try:
+        gender = _detect_customer_gender(user_id, conversations)
+    except TypeError:
+        gender = _detect_customer_gender(user_id)
+
+    return {
+        "phone_number": user_id,
+        "customer_name": customer_name,
+        "gender": gender,
+        "summary": safe_summary,
+        "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+        "total_messages": total_user_msgs,
+    }
+
 def ensure_system_prompt_for_user(user_id: str) -> None:
     """ודא שהיסטוריית השיחה למשתמש מתחילה בהודעת system עם ה-agent prompt."""
     if user_id not in conversations or not conversations[user_id]:
@@ -252,6 +286,9 @@ def set_customer_pushname(user_id: str, pushname: str):
 
 # שמירת סיכום שיחה עם פרטי לקוח
 def save_conversation_summary(user_id: str, summary: str):
+    summary_data = _build_summary_document(user_id, summary)
+    print(f"[save_conversation_summary] saving for {user_id}: {len(summary_data.get('summary',''))} chars")
+
     # בקרת כפילויות: הגבל סיכום לשיחה לפעם אחת, ועוד פעם אחת בלבד אם הייתה המשכיות מצד הלקוח
     from conversation_summaries import summaries_manager, extract_customer_name, detect_customer_gender
 
@@ -313,7 +350,7 @@ def save_conversation_summary(user_id: str, summary: str):
 📅 תאריך: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 {'='*50}
 
-{summary}
+{summary_data.get('summary','')}
 
 {'='*50}
 """
@@ -322,9 +359,23 @@ def save_conversation_summary(user_id: str, summary: str):
     with open(filepath, "w", encoding="utf-8-sig") as f:
         f.write(existing_content + summary_section)
 
+    # שמור במסד הנתונים (MongoDB) עם מסמך יציב שמכיל תמיד "summary"
+    try:
+        from mongodb_manager import mongodb_manager
+        try:
+            mongo_saved = mongodb_manager.save_summary(user_id, summary_data)
+        except Exception as e:
+            mongo_saved = False
+            print(f"⚠️ שמירה ל-MongoDB נכשלה: {e}")
+        if mongo_saved:
+            print(f"[save_conversation_summary] saved OK for {user_id}")
+    except Exception as e:
+        print(f"⚠️ טעינת mongodb_manager נכשלה: {e}")
+
     # שמור במערכת הסיכומים (תעד user_message_count ו-summary_count)
     try:
-        summaries_manager.add_summary(user_id, summary, conversations, pushname)
+        # ודא שהמחרוזת שנשמרת במערכות הנלוות היא זו מתוך summary_data
+        summaries_manager.add_summary(user_id, summary_data.get('summary',''), conversations, pushname)
         # עדכן מצב בקרת סיכומים
         summary_control[user_id]["count"] = state.get("count", 0) + 1
         summary_control[user_id]["user_msg_count_at_last"] = current_user_msg_count
