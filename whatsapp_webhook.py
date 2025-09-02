@@ -1049,9 +1049,9 @@ def enhance_text_for_voice(text):
     try:
         print("🎤 משפר טקסט לתגובה קולית עם טון אנושי ושקול במבטא ישראלי...")
         
-        # אם הטקסט ריק, החזר ברירת מחדל אנושית ושקולה
+        # אם הטקסט ריק, החזר ברירת מחדל אנושית ושקולה (ללא טמפלייט קבוע)
         if not text or not text.strip():
-            return "שלום, אני כאן לעזור לך. איך אני יכולה לסייע?"
+            return "מצטערת, לא קיבלתי את מה שרצית לומר. תוכל לנסות שוב?"
         
         # הוסף רגשות ותוספות לטקסט כדי להפוך אותו לשמח יותר
         enhanced_text = text

@@ -290,18 +290,11 @@ def save_conversation_summary(user_id: str, summary: str):
     safe_summary_text = (summary or "").strip()
     suspicious_reply_like = False
     try:
-        suspicious_starts = ("היי", "סבבה", "מעולה")
-        if len(safe_summary_text) < 20:
+        # רק סינון טקסטים קצרים מדי או ריקים - לא נסנן תוכן לפי מילים
+        if len(safe_summary_text) < 50:  # הגדלנו את הסף מ-20 ל-50
             suspicious_reply_like = True
-        elif safe_summary_text.startswith(suspicious_starts):
-            suspicious_reply_like = True
-        else:
-            # זיהוי אימוג'ים בסיסי לפי טווחי יוניקוד נפוצים
-            for _ch in safe_summary_text:
-                _code = ord(_ch)
-                if (0x1F300 <= _code <= 0x1FAFF) or (0x2600 <= _code <= 0x27BF):
-                    suspicious_reply_like = True
-                    break
+            print(f"[save_conversation_summary] SKIP - summary too short: {len(safe_summary_text)} chars")
+        # הסרנו את הסינון לפי מילים ואימוג'ים כדי לאפשר סיכומים אמיתיים
     except Exception:
         pass
     if suspicious_reply_like:
@@ -673,12 +666,19 @@ def chat_with_gpt(user_message: str, user_id: str = "default") -> str:
             ensure_system_prompt_for_user(user_id)
             # השיחה נטענה - תן הודעה שמתאימה להמשך השיחה
             if is_greeting_message(user_message):
-                # אם הלקוח מתחיל עם שלום אבל יש שיחה קיימת
+                # אם הלקוח מתחיל עם שלום אבל יש שיחה קיימת - תן לGPT לטפל בזה
                 conversations[user_id].append({"role": "user", "content": user_message})
-                welcome_back_response = "שלום! נחמד לראות אותך שוב. בואו נמשיך מאיפה שעצרנו - איך אני יכולה לעזור לך עם דף הנחיתה?"
-                conversations[user_id].append({"role": "assistant", "content": welcome_back_response})
+                
+                # שלח ל-GPT לקבלת תגובה מותאמת אישית במקום טמפלייט קבוע
+                response = client.chat.completions.create(
+                    model="gpt-5-chat-latest",
+                    messages=conversations[user_id]
+                )
+                
+                personalized_response = response.choices[0].message.content
+                conversations[user_id].append({"role": "assistant", "content": personalized_response})
                 save_conversation_to_file(user_id)
-                return welcome_back_response
+                return personalized_response
         else:
             # התחל שיחה חדשה
             conversations[user_id] = [{"role": "system", "content": system_prompt}]
