@@ -439,10 +439,7 @@ def should_end_conversation_naturally(user_message: str, conversation_history: l
     
     # מילות סיום מפורשות - רק ביטויים ברורים מאוד
     ending_phrases = [
-        "תודה רבה", "תודה רבה רבה", "שבוע טוב", "חג שמח", "בהצלחה",
-        "נדבר", "נהיה בקשר", "אני אחזור אליך", "אני אחשוב על זה",
-        "לילה טוב", "יום טוב", "שלום", "ביי", "להתראות",
-        "סיימתי", "זהו", "זה הכל", "זהו זה", "זהו זהו"
+     " ביי"
     ]
     
     # בדוק אם יש ביטוי סיום מפורש
@@ -619,8 +616,7 @@ def check_and_summarize_old_conversations():
 def is_greeting_message(message: str) -> bool:
     """בדוק אם זו הודעת פתיחה עם שלום"""
     message_lower = message.lower().strip()
-    greetings = ['שלום', 'היי', 'הי', 'שלום לך', 'שלום לכם', 'שלום עליכם', 'מה נשמע', 'מה קורה']
-    
+    greetings = ['היי', 'הי', 'שלום לך', 'שלום לכם', 'שלום עליכם', 'מה נשמע', 'מה קורה']
     # בדוק אם ההודעה מתחילה עם ברכה או מכילה רק ברכה
     for greeting in greetings:
         if message_lower.startswith(greeting) or message_lower == greeting:
